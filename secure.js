@@ -1143,3 +1143,161 @@ self.addEventListener('notificationclick', event => {
 
   addPushButtons();
 })();
+// تحديث الحساب اليومي
+const legacyDailyReport = makeDailyReport;
+makeDailyReport = function (d, date) {
+  if (d.dailyVersion !== 2 || date < d.startDate)
+    return legacyDailyReport({
+      ...d,
+      opening: d.legacyOpening ?? d.opening
+    }, date);
+
+  const v = d.days?.[date];
+  const rows = (d.entries || []).filter(e => e.date === date);
+  const opening = Number(v?.opening || 0);
+  const topups = Number(v?.topups || 0);
+  const spent = rows.reduce((s, e) => s + Number(e.amount), 0);
+
+  return {
+    date, rows, opening, topups, spent,
+    closing: opening + topups - spent,
+    daily: true,
+    closed: !!v?.closed,
+    unopened: !v
+  };
+};
+
+const legacyDailyTotals = sharedTotals;
+sharedTotals = function (d) {
+  if (d.dailyVersion !== 2) return legacyDailyTotals(d);
+
+  return '<p>حساب يوم ' + esc(datefmt(d.date)) +
+    ' — توقيت بغداد</p>' +
+    stat('الرصيد الافتتاحي لليوم', Number(d.opening)) +
+    stat('مخصص اليوم مع التعزيزات', Number(d.funded)) +
+    stat('مصروف اليوم', Number(d.spent)) +
+    stat('المتبقي لليوم', Number(d.remaining));
+};
+
+const legacyDailyRows = sharedRows;
+sharedRows = function (d) {
+  return legacyDailyRows(d.dailyVersion === 2 ? {
+    ...d,
+    entries: d.entries.filter(e => e.date === d.date)
+  } : d);
+};
+
+const legacyDailyHTML = reportDailyHTML;
+reportDailyHTML = function (r) {
+  const html = legacyDailyHTML(r);
+  if (!r.daily) return html;
+
+  return html.replace(
+    'الرصيد قبل اليوم:',
+    'الرصيد الافتتاحي لهذا اليوم:'
+  ) + '<p>' + (
+    r.unopened ? 'لم يُفتح مخصص لهذا اليوم.' :
+    r.closed ? 'تم ترحيل المتبقي إلى الإيرادات: ' +
+      fmt(Math.max(0, r.closing)) :
+      'يُرحّل المتبقي إلى الإيرادات بعد انتهاء اليوم.'
+  ) + '</p>';
+};
+
+const dailyBeforeV2 = sharedDaily;
+sharedDaily = async function () {
+  await dailyBeforeV2();
+  const form = document.getElementById('openingForm');
+  if (form) {
+    form.querySelector('h3').textContent =
+      'الرصيد الافتتاحي لهذا اليوم — للمدير';
+    form.querySelector('p').textContent =
+      'التعديل يخص اليوم فقط. كل يوم جديد يبدأ بالمخصص الأساسي المحفوظ، والمتبقي من اليوم المنتهي يُسجّل إيراداً مرة واحدة.';
+  }
+};
+
+recordFund = async function (event, operation) {
+  event.preventDefault();
+  const form = event.target;
+  if (form.dataset.sending === 'yes') return;
+
+  const f = new FormData(form);
+  const amount = Number(f.get('amount'));
+  const date = operation === 'spend'
+    ? f.get('expense_date') : awtarToday();
+
+  if (!Number.isSafeInteger(amount) || amount < 1 || !date)
+    return alert('تحقق من المبلغ والتاريخ');
+
+  const body = {
+    operation,
+    amount,
+    item: operation === 'spend'
+      ? f.get('item') : 'تعزيز رصيد',
+    details: f.get('details'),
+    expense_date: date
+  };
+
+  const signature = JSON.stringify(body);
+
+  if (form.dataset.pending &&
+      form.dataset.signature !== signature)
+    return alert(
+      'لم يُؤكد حفظ المحاولة السابقة. أعد نفس البيانات للتحقق قبل إدخال عملية أخرى.'
+    );
+
+  if (!form.dataset.pending) {
+    if (!confirm(
+      'تأكيد ' + (operation === 'spend' ? 'صرف ' : 'إضافة ') +
+      fmt(amount) + ' بتاريخ ' + datefmt(date) + '؟'
+    )) return;
+
+    form.dataset.pending = crypto.randomUUID();
+    form.dataset.signature = signature;
+  }
+
+  form.dataset.sending = 'yes';
+  busy(true);
+  let saved = false;
+
+  try {
+    await api('/rest/v1/rpc/awtar_cash_record_dated', {
+      ...body,
+      request_id: form.dataset.pending
+    });
+
+    saved = true;
+    delete form.dataset.pending;
+    delete form.dataset.signature;
+    form.reset();
+
+    if (form.elements.expense_date)
+      form.elements.expense_date.value = awtarToday();
+
+    if (profile.role === 'admin') await refreshAdmin();
+    await refreshFund();
+    alert('تم الحفظ');
+  } catch (error) {
+    alert(saved
+      ? 'العملية محفوظة؛ حدّث الصفحة لعرض الرصيد.'
+      : 'لم يتم تأكيد الحفظ: ' + error.message +
+        ' — تحقق من السجل؛ إعادة نفس المحاولة تستخدم رقم العملية نفسه.');
+  } finally {
+    delete form.dataset.sending;
+    busy(false);
+  }
+};
+
+const refreshAdminBeforeDailyV2 = refreshAdmin;
+refreshAdmin = async function () {
+  await api('/rest/v1/rpc/awtar_cash_summary', {});
+  return refreshAdminBeforeDailyV2();
+};
+
+const removeEntryBeforeDailyV2 = removeEntry;
+removeEntry = function (id) {
+  if (db.entries.find(e => e.id === id)?.dailyReturnDate)
+    return alert(
+      'هذا إيراد ترحيل تلقائي. لتصحيحه عدّل مصروفات اليوم الأصلي؛ يتحدث المتبقي تلقائياً.'
+    );
+  return removeEntryBeforeDailyV2(id);
+};
