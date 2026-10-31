@@ -471,3 +471,96 @@ printDailyReport = function () {
   document.body.append(area);
   window.print();
 };
+// تعديل الرصيد الافتتاحي — للمدير فقط
+const totalsBeforeOpening = sharedTotals;
+sharedTotals = function (d) {
+  return stat('الرصيد الافتتاحي', Number(d.opening ?? 3000000)) +
+    totalsBeforeOpening(d);
+};
+
+const dailyBeforeOpening = sharedDaily;
+sharedDaily = async function () {
+  await dailyBeforeOpening();
+
+  const totals = document.getElementById('fundTotals');
+  if (!totals) return;
+
+  const panel = totals.closest('section');
+  panel.querySelectorAll('p').forEach(p => {
+    if (p.textContent.includes('الرصيد الافتتاحي 3,000,000'))
+      p.remove();
+  });
+
+  if (profile?.role !== 'admin' ||
+      document.getElementById('openingForm')) return;
+
+  panel.insertAdjacentHTML('beforeend', `
+    <form id="openingForm">
+      <h3>تعديل الرصيد الافتتاحي — للمدير فقط</h3>
+      <p>هذا يصحح رصيد البداية؛ لتمويل إضافي استخدم زيادة الرصيد.</p>
+      <label>الرصيد الافتتاحي الجديد بالدينار</label>
+      <input name="opening" type="number"
+        min="0" max="9007199254740991"
+        step="1" required>
+      <button type="submit">حفظ الرصيد الافتتاحي</button>
+    </form>
+  `);
+
+  document.getElementById('openingForm').onsubmit =
+    changeOpeningBalance;
+};
+
+async function changeOpeningBalance(e) {
+  e.preventDefault();
+  if (profile?.role !== 'admin') return;
+
+  const form = e.target;
+  const value = new FormData(form).get('opening');
+  const amount = Number(value);
+
+  if (!String(value).trim() ||
+      !Number.isSafeInteger(amount) || amount < 0)
+    return alert('اكتب مبلغاً صحيحاً');
+
+  if (!confirm('تغيير الرصيد الافتتاحي إلى ' + fmt(amount) + '؟'))
+    return;
+
+  busy(true);
+  try {
+    await api('/rest/v1/rpc/awtar_cash_opening', {
+      request_id: crypto.randomUUID(),
+      new_opening: amount
+    });
+
+    form.reset();
+    await refreshAdmin();
+    await refreshFund();
+    alert('تم حفظ الرصيد الافتتاحي');
+  } catch (x) {
+    alert('تعذر تأكيد التعديل؛ حدّث الرصيد للتحقق: ' + x.message);
+  } finally {
+    busy(false);
+  }
+}
+
+// احتساب الكشف حسب الرصيد الافتتاحي المحفوظ
+makeDailyReport = function (d, date) {
+  const sum = rows =>
+    rows.reduce((total, e) => total + Number(e.amount), 0);
+
+  const entries = d.entries || [];
+  const additions = d.topups || [];
+  const rows = entries.filter(e => e.date === date);
+
+  const opening = Number(d.opening ?? 3000000) +
+    sum(additions.filter(e => e.date < date)) -
+    sum(entries.filter(e => e.date < date));
+
+  const topups = sum(additions.filter(e => e.date === date));
+  const spent = sum(rows);
+
+  return {
+    date, rows, opening, topups, spent,
+    closing: opening + topups - spent
+  };
+};
