@@ -936,3 +936,46 @@ employee = async function () {
     }
   };
 };
+self.addEventListener('push', event => {
+  let data = {};
+
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = { body: 'تم تسجيل حركة جديدة في برنامج أوتار' };
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(
+      data.title || 'مطعم وكافيه أوتار',
+      {
+        body: data.body || 'تم تسجيل حركة جديدة',
+        tag: data.id || 'awtar-activity',
+        dir: 'rtl',
+        lang: 'ar',
+        data: {
+          url: new URL('./', self.registration.scope).href
+        }
+      }
+    )
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+
+  event.waitUntil((async () => {
+    const url = new URL('./', self.registration.scope).href;
+    const windows = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true
+    });
+
+    for (const client of windows) {
+      if (client.url.startsWith(url) && 'focus' in client)
+        return client.focus();
+    }
+
+    return self.clients.openWindow(url);
+  })());
+});
