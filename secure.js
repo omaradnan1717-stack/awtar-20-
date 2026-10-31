@@ -25,4 +25,147 @@ function importOld(){if(profile?.role!=='admin')return;if(db.entries.length||db.
 const restoreBeforeCloud=restore;restore=async function(){if(profile?.role!=='admin')return;if(db.entries.length||db.parties.length)return alert('الاستيراد متاح عندما تكون القاعدة المشتركة فارغة فقط');await restoreBeforeCloud()};
 const backupBeforeCloud=backup;backup=function(){return backupBeforeCloud().replace('البيانات محفوظة داخل متصفح هذا الجهاز فقط، وقد تُفقد عند مسح بيانات Safari أو استخدام التصفح الخاص. النسخة لا تحتوي على تسجيل دخول أو مزامنة بين الأجهزة.','البيانات محفوظة في قاعدة البيانات المشتركة. البيانات القديمة بهذا الجهاز تبقى محفوظة حتى تستوردها. لا تشارك حساب المدير.')};
 boot();
-restore=async function(){if(profile?.role!=='admin')return;if(db.entries.length||db.parties.length)return alert('الاستيراد متاح عندما تكون القاعدة المشتركة فارغة فقط');const file=document.getElementById('restore').files[0];if(!file)return alert('اختر ملف النسخة');busy(true);try{const incoming=JSON.parse(await file.text());if(!validDB(incoming))throw Error('النسخة غير صالحة');if(!confirm('استيراد البيانات إلى القاعدة المشتركة؟'))return;await api('/rest/v1/rpc/awtar_save',{body:incoming,expected:revision});await refreshAdmin();render();alert('تم الاستيراد والحفظ')}catch(x){alert('لم يتم تأكيد الاستيراد: '+x.message)}finally{busy(false)}};
+restore=async function(){if(profile?.role!=='admin')return;if(db.entries.length||db.parties.length)return alert('الاستيراد متاح عندما تكون القاعدة المشتركة فارغة فقط');const file=document.getElementById('restore').files[0];if(!file)return alert('اختر ملف النسخة');busy(true);try{const incoming=JSON.parse(await file.text());if(!validDB(incoming))throw Error('النسخة غير صالحة');if(!confirm('استيراد البيانات إلى القاعدة المشتركة؟'))return;await api('/rest/v1/rpc/awtar_save',{body:incoming,expected:revision});await refreshAdmin();render();alert('تم الاستيراد والحفظ')}catch(x){alert('لم يتم تأكيد الاستيراد: '+x.message)}finally{busy(const adminRenderWithSettings = render;
+render = function () {
+  adminRenderWithSettings();
+  if (profile?.role === 'admin')
+    nav.insertAdjacentHTML('afterbegin',
+      '<button onclick="sharedDaily()">الصرفيات اليومية</button>');
+};
+
+const employeeWithMovements = employee;
+employee = async function () {
+  await employeeWithMovements();
+  nav.insertAdjacentHTML('afterbegin',
+    '<button onclick="sharedDaily()">الصرفيات اليومية</button>');
+};
+
+let dailyPoll = null;
+
+async function sharedDaily() {
+  if (!profile) return;
+  clearInterval(dailyPoll);
+  busy(true);
+  try {
+    const data = await api('/rest/v1/rpc/awtar_cash_summary', {});
+    app.innerHTML = `
+      <section class="panel">
+        <h2>الصرفيات اليومية</h2>
+        <p>الرصيد الافتتاحي 3,000,000 دينار، وكل صرف ينخصم منه.</p>
+        <button onclick="sharedDaily()">تحديث</button>
+        <div class="cards" id="fundTotals">${sharedTotals(data)}</div>
+        <p id="fundSync">تم التحديث</p>
+      </section>
+      <section class="panel">
+        <h2>تسجيل صرف</h2>
+        <form id="cloudSpend">
+          <div><label>المادة / وجه الصرف</label>
+            <input name="item" required maxlength="100"></div>
+          <div><label>التفاصيل</label>
+            <input name="details" required maxlength="300"></div>
+          <div><label>المبلغ بالدينار</label>
+            <input name="amount" type="number" min="1" step="1" required></div>
+          <button>حفظ وخصم المبلغ</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>سجل الصرفيات</h2>
+        <div id="fundRows">${sharedRows(data)}</div>
+      </section>
+      ${profile.role === 'admin' ? `
+      <section class="panel">
+        <h2>زيادة الرصيد — للمدير</h2>
+        <form id="cloudTopup">
+          <div><label>المبلغ</label>
+            <input name="amount" type="number" min="1" step="1" required></div>
+          <div><label>البيان</label>
+            <input name="details" required maxlength="300"></div>
+          <button>زيادة الرصيد</button>
+        </form>
+      </section>` : ''}`;
+
+    document.getElementById('cloudSpend').onsubmit =
+      e => recordFund(e, 'spend');
+    const top = document.getElementById('cloudTopup');
+    if (top) top.onsubmit = e => recordFund(e, 'topup');
+    dailyPoll = setInterval(refreshFund, 10000);
+  } catch (x) {
+    alert(x.message);
+  } finally {
+    busy(false);
+  }
+}
+
+function sharedTotals(d) {
+  return stat('إجمالي المخصص', d.funded) +
+    stat('إجمالي المصروف', d.spent) +
+    stat('الصافي المتبقي', d.remaining);
+}
+
+function sharedRows(d) {
+  return `<div class="scroll"><table>
+    <thead><tr>
+      <th>التاريخ</th><th>المادة</th><th>التفاصيل</th>
+      <th>المبلغ</th><th>الموظف</th>
+    </tr></thead><tbody>
+    ${d.entries.slice().reverse().map(e => `
+      <tr>
+        <td>${datefmt(e.date)}</td>
+        <td>${esc(e.category)}</td>
+        <td>${esc(e.note)}</td>
+        <td>${fmt(e.amount)}</td>
+        <td>${esc(e.actorName)}</td>
+      </tr>`).join('') ||
+      '<tr><td colspan="5">لا توجد صرفيات</td></tr>'}
+    </tbody></table></div>`;
+}
+
+async function refreshFund() {
+  if (!profile || !document.getElementById('fundTotals')) {
+    clearInterval(dailyPoll);
+    return;
+  }
+  try {
+    const d = await api('/rest/v1/rpc/awtar_cash_summary', {});
+    if (!document.getElementById('fundTotals')) return;
+    document.getElementById('fundTotals').innerHTML = sharedTotals(d);
+    document.getElementById('fundRows').innerHTML = sharedRows(d);
+    document.getElementById('fundSync').textContent =
+      'آخر تحديث: ' + new Date().toLocaleTimeString('ar-IQ');
+  } catch (_) {
+    const el = document.getElementById('fundSync');
+    if (el) el.textContent = 'تعذر التحديث؛ تحقق من الاتصال أو سجل دخولك مجدداً';
+  }
+}
+
+async function recordFund(e, operation) {
+  e.preventDefault();
+  const form = e.target;
+  const f = new FormData(form);
+  const amount = Number(f.get('amount'));
+  if (!Number.isSafeInteger(amount) || amount < 1)
+    return alert('المبلغ غير صحيح');
+  if (!confirm('تأكيد ' +
+      (operation === 'spend' ? 'صرف ' : 'إضافة ') + fmt(amount)))
+    return;
+
+  busy(true);
+  try {
+    await api('/rest/v1/rpc/awtar_cash_record', {
+      request_id: crypto.randomUUID(),
+      operation,
+      amount,
+      item: operation === 'spend' ? f.get('item') : 'تعزيز رصيد',
+      details: f.get('details')
+    });
+    form.reset();
+    if (profile.role === 'admin') await refreshAdmin();
+    await refreshFund();
+    alert('تم الحفظ في الحساب المشترك');
+  } catch (x) {
+    alert('لم يتم تأكيد الحفظ: ' + x.message +
+      '؛ تحقق من السجل قبل تكرار العملية');
+  } finally {
+    busy(false);
+  }
+}
