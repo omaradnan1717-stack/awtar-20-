@@ -168,7 +168,9 @@ async function recordFund(e, operation) {
       '؛ تحقق من السجل قبل تكرار العملية');
   } finally {
     busy(false);
-  }// تحديث التاريخ والحذف وكشف اليوم
+  }
+}
+// تحديث التاريخ والحذف وكشف اليوم
 function awtarToday() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Baghdad',
@@ -422,4 +424,3 @@ refreshFund = async function () {
   if (document.getElementById('dailyReportBody'))
     await loadDailyReport();
 };
-}
