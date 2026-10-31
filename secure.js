@@ -746,3 +746,193 @@ function bindEmployeeDebt(formId, operation) {
     }
   };
 }
+const employeeBeforeInvoice = employee;
+employee = async function () {
+  await employeeBeforeInvoice();
+
+  const movement = document.getElementById('movement');
+  if (!movement || profile?.role !== 'employee') return;
+  if (document.getElementById('materialInvoice')) return;
+
+  // إبقاء التسديد بالاستمارة القديمة
+  const operation = document.getElementById('operation');
+  operation.querySelector('option[value="withdraw"]')?.remove();
+  operation.value = 'pay';
+  operation.dispatchEvent(new Event('change'));
+
+  const panel = document.createElement('section');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <h2>سحب مواد على الحساب</h2>
+    <form id="materialInvoice">
+      <fieldset style="border:0;padding:0;min-width:0">
+        <label>الحساب</label>
+        <select name="party" required>
+          <option value="">اختر الحساب</option>
+          ${accounts.map(p => `
+            <option value="${esc(p.id)}">
+              ${esc(p.name)} — المتبقي ${fmt(p.balance)}
+            </option>
+          `).join('')}
+        </select>
+
+        <div class="scroll">
+          <table style="min-width:650px">
+            <thead><tr>
+              <th>المادة</th>
+              <th>الكمية</th>
+              <th>سعر الوحدة</th>
+              <th>الإجمالي</th>
+              <th>إزالة السطر</th>
+            </tr></thead>
+            <tbody id="invoiceRows"></tbody>
+          </table>
+        </div>
+
+        <button type="button" id="invoiceAdd">
+          إضافة مادة
+        </button>
+        <h3>المجموع الكلي:
+          <span id="invoiceTotal">0 د.ع</span>
+        </h3>
+      </fieldset>
+
+      <p id="invoiceStatus" role="status"></p>
+      <button type="submit" id="invoiceSave">
+        مراجعة وحفظ سحب المواد
+      </button>
+    </form>
+  `;
+
+  movement.closest('section').after(panel);
+
+  const form = document.getElementById('materialInvoice');
+  const rows = document.getElementById('invoiceRows');
+  const fieldset = form.querySelector('fieldset');
+  const saveButton = document.getElementById('invoiceSave');
+  const status = document.getElementById('invoiceStatus');
+  let pending = null;
+  let sending = false;
+
+  function calculate() {
+    let total = 0;
+    let valid = true;
+
+    rows.querySelectorAll('tr').forEach(row => {
+      const quantity = Number(row.querySelector('.qty').value);
+      const price = Number(row.querySelector('.price').value);
+      const line = quantity * price;
+
+      const ok = Number.isSafeInteger(quantity) &&
+        quantity > 0 && quantity <= 100000 &&
+        Number.isSafeInteger(price) && price > 0 &&
+        Number.isSafeInteger(line);
+
+      row.querySelector('.lineTotal').textContent =
+        ok ? fmt(line) : '—';
+
+      if (ok) total += line;
+      else valid = false;
+    });
+
+    if (!Number.isSafeInteger(total)) valid = false;
+
+    document.getElementById('invoiceTotal').textContent =
+      valid ? fmt(total) : 'تحقق من الكمية والسعر';
+
+    return valid ? total : null;
+  }
+
+  function addRow() {
+    if (rows.children.length >= 50)
+      return alert('الحد الأعلى 50 مادة');
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td><input class="itemName"
+        aria-label="اسم المادة"
+        required maxlength="100"></td>
+      <td><input class="qty" aria-label="الكمية"
+        type="number" min="1" max="100000"
+        step="1" value="1" required></td>
+      <td><input class="price" aria-label="سعر الوحدة"
+        type="number" min="1" max="9007199254740991"
+        step="1" required></td>
+      <td class="lineTotal">—</td>
+      <td><button type="button">إزالة</button></td>
+    `;
+
+    row.querySelector('button').onclick = () => {
+      row.remove();
+      calculate();
+    };
+    rows.append(row);
+    calculate();
+  }
+
+  document.getElementById('invoiceAdd').onclick = addRow;
+  rows.oninput = calculate;
+  addRow();
+
+  form.onsubmit = async function (event) {
+    event.preventDefault();
+    if (sending || profile?.role !== 'employee') return;
+
+    if (!pending) {
+      const partyId = form.elements.party.value;
+      const account = accounts.find(p => p.id === partyId);
+      if (!account) return alert('اختر الحساب');
+
+      const items = [...rows.querySelectorAll('tr')].map(row => ({
+        name: row.querySelector('.itemName').value.trim(),
+        quantity: Number(row.querySelector('.qty').value),
+        price: Number(row.querySelector('.price').value)
+      }));
+
+      const total = calculate();
+      if (!items.length || items.some(x => !x.name) ||
+          total === null || total < 1)
+        return alert('أكمل أسماء المواد والكميات والأسعار');
+
+      if (!confirm(
+        'تسجيل سحب مواد على: ' + account.name +
+        '\nعدد السطور: ' + items.length +
+        '\nالمجموع: ' + fmt(total) +
+        '\nسيُضاف المجموع إلى الدين. تأكيد؟'
+      )) return;
+
+      pending = { party_id: partyId, items };
+    }
+
+    sending = true;
+    fieldset.disabled = true;
+    saveButton.disabled = true;
+    status.textContent = 'جاري حفظ سحب المواد…';
+
+    try {
+      if (!pending.request_id)
+        pending.request_id = crypto.randomUUID();
+
+      await api('/rest/v1/rpc/awtar_material_invoice', pending);
+    } catch (error) {
+      sending = false;
+      saveButton.disabled = false;
+      saveButton.textContent = 'إعادة محاولة نفس العملية';
+      status.textContent =
+        'لم يتم تأكيد الحفظ: ' + error.message +
+        ' — إعادة المحاولة تستخدم نفس رقم العملية لمنع التكرار.';
+      return;
+    }
+
+    pending = null;
+    status.textContent = 'تم حفظ المواد وإضافة مجموعها إلى الدين';
+    alert('تم حفظ سحب المواد بنجاح');
+
+    try {
+      await employee();
+    } catch (_) {
+      status.textContent =
+        'العملية محفوظة. اضغط تحديث الحسابات لتحديث الرصيد.';
+    }
+  };
+};
