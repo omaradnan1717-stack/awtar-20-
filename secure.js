@@ -614,3 +614,135 @@ sharedDaily = async function () {
     button.onclick = () => loadDailyReport(true);
   }
 };
+const employeeBeforeDebts = employee;
+employee = async function () {
+  await employeeBeforeDebts();
+
+  const movement = document.getElementById('movement');
+  if (!movement || profile?.role !== 'employee') return;
+
+  const description = movement.closest('section').querySelector('p');
+  if (description) {
+    description.textContent =
+      'صلاحيتك: فتح حساب مدين وإضافة دين وسحب مواد وتسديد. التعديل والحذف للمدير.';
+  }
+
+  app.insertAdjacentHTML('beforeend', `
+    <section class="panel">
+      <h2>فتح حساب مدين جديد</h2>
+      <form id="employeeNewAccount">
+        <label>اسم الشخص أو المجهز</label>
+        <input name="account_name" required maxlength="100">
+        <label>رقم الهاتف — اختياري</label>
+        <input name="account_phone" type="tel" maxlength="30">
+        <button type="submit">فتح الحساب</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>إضافة دين على حساب</h2>
+      <form id="employeeAddDebt">
+        <label>الحساب</label>
+        <select name="party_id" required>
+          <option value="">اختر الحساب</option>
+          ${accounts.map(p => `
+            <option value="${esc(p.id)}">
+              ${esc(p.name)} — المتبقي ${fmt(p.balance)}
+            </option>
+          `).join('')}
+        </select>
+        <label>مبلغ الدين بالدينار</label>
+        <input name="amount" type="number"
+          min="1" max="9007199254740991" step="1" required>
+        <label>بيان الدين / المواد المسحوبة</label>
+        <input name="details" required maxlength="300">
+        <button type="submit">مراجعة وإضافة الدين</button>
+      </form>
+      <p>سجّل العملية مرة واحدة: بسحب المواد أو بإضافة الدين.</p>
+    </section>
+  `);
+
+  bindEmployeeDebt('employeeNewAccount', 'create');
+  bindEmployeeDebt('employeeAddDebt', 'add');
+};
+
+function bindEmployeeDebt(formId, operation) {
+  const form = document.getElementById(formId);
+  let pending = null;
+  let sending = false;
+
+  form.onsubmit = async function (event) {
+    event.preventDefault();
+    if (sending || profile?.role !== 'employee') return;
+
+    if (!pending) {
+      const f = new FormData(form);
+      const payload = { operation };
+
+      if (operation === 'create') {
+        payload.account_name =
+          String(f.get('account_name') || '').trim();
+        payload.account_phone =
+          String(f.get('account_phone') || '').trim();
+
+        if (!payload.account_name)
+          return alert('اكتب اسم الحساب');
+
+        if (!confirm('فتح حساب باسم: ' + payload.account_name + '؟'))
+          return;
+      } else {
+        payload.party_id = f.get('party_id');
+        payload.amount = Number(f.get('amount'));
+        payload.details = String(f.get('details') || '').trim();
+
+        const account = accounts.find(
+          p => p.id === payload.party_id
+        );
+
+        if (!account) return alert('اختر الحساب');
+        if (!Number.isSafeInteger(payload.amount) ||
+            payload.amount < 1 || !payload.details)
+          return alert('تحقق من المبلغ وبيان الدين');
+
+        if (!confirm(
+          'إضافة دين على: ' + account.name +
+          '\nالمبلغ: ' + fmt(payload.amount) +
+          '\nالبيان: ' + payload.details
+        )) return;
+      }
+
+      pending = payload;
+    }
+
+    const button = form.querySelector('button');
+    sending = true;
+    button.disabled = true;
+
+    try {
+      if (!pending.request_id)
+        pending.request_id = crypto.randomUUID();
+
+      await api('/rest/v1/rpc/awtar_employee_debt', pending);
+    } catch (error) {
+      alert(
+        'لم يتم تأكيد التسجيل: ' + error.message +
+        '\nاضغط نفس الزر لإعادة المحاولة بنفس رقم العملية.'
+      );
+      sending = false;
+      button.disabled = false;
+      return;
+    }
+
+    pending = null;
+    form.reset();
+    alert('تم التسجيل بنجاح');
+
+    try {
+      await employee();
+    } catch (error) {
+      alert('العملية محفوظة؛ اضغط تحديث الحسابات لتحديث العرض.');
+      sending = false;
+      button.disabled = false;
+    }
+  };
+}
