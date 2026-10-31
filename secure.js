@@ -564,3 +564,53 @@ makeDailyReport = function (d, date) {
     closing: opening + topups - spent
   };
 };
+loadDailyReport = async function (show = false) {
+  const input = document.getElementById('dailyReportDate');
+  const body = document.getElementById('dailyReportBody');
+  if (!input || !body) return;
+  if (!input.value) return alert('اختر تاريخ الكشف');
+
+  const date = input.value;
+  const request = ++dailyReportRequest;
+
+  if (show) {
+    body.textContent = 'جاري تحميل الكشف…';
+    body.scrollIntoView({ block: 'start' });
+  }
+
+  try {
+    const data = await api('/rest/v1/rpc/awtar_cash_summary', {});
+    if (request !== dailyReportRequest ||
+        !body.isConnected || input.value !== date) return;
+
+    currentDailyReport = makeDailyReport(data, date);
+    body.innerHTML = reportDailyHTML(currentDailyReport) + `
+      <p>
+        <button type="button" onclick="printDailyReport()">
+          طباعة الكشف
+        </button>
+        <button type="button" onclick="whatsappDailyReport()">
+          إرسال عبر الواتساب
+        </button>
+      </p>`;
+
+    if (show) body.scrollIntoView({ block: 'start' });
+  } catch (error) {
+    if (request !== dailyReportRequest || !body.isConnected) return;
+    currentDailyReport = null;
+    body.textContent = 'تعذر عرض الكشف: ' + error.message;
+  }
+};
+
+const dailyBeforeReportClick = sharedDaily;
+sharedDaily = async function () {
+  await dailyBeforeReportClick();
+  const input = document.getElementById('dailyReportDate');
+  if (!input) return;
+
+  const button = input.closest('section').querySelector('button');
+  if (button) {
+    button.type = 'button';
+    button.onclick = () => loadDailyReport(true);
+  }
+};
