@@ -979,3 +979,167 @@ self.addEventListener('notificationclick', event => {
     return self.clients.openWindow(url);
   })());
 });
+// تفعيل إشعارات المدير
+(() => {
+  let working = false;
+
+  async function pushRequest(action) {
+    const response = await fetch(
+      cfg.url + '/functions/v1/clever-worker',
+      {
+        method: 'POST',
+        headers: {
+          apikey: cfg.key,
+          Authorization: 'Bearer ' + session.access_token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw Error(result.error || result.message ||
+        'تعذر الاتصال بالإشعارات');
+    }
+
+    return result;
+  }
+
+  function keyBytes(key) {
+    const value = key.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(
+      value + '='.repeat((4 - value.length % 4) % 4)
+    );
+    return Uint8Array.from(decoded, c => c.charCodeAt(0));
+  }
+
+  async function enablePush(button) {
+    if (working || profile?.role !== 'admin') return;
+
+    if (!('serviceWorker' in navigator) ||
+        !('PushManager' in window) ||
+        !('Notification' in window)) {
+      alert('افتح البرنامج من أيقونته بالشاشة الرئيسية حتى تفعّل الإشعارات');
+      return;
+    }
+
+    working = true;
+    button.disabled = true;
+
+    try {
+      // طلب السماح مباشرة من ضغطة المستخدم
+      const permission = await Notification.requestPermission();
+
+      if (permission !== 'granted') {
+        throw Error('لازم تسمح بالإشعارات حتى توصلك التنبيهات');
+      }
+
+      const userId = profile.user_id;
+      const result = await pushRequest('public-key');
+
+      if (!result.publicKey) {
+        throw Error('مفتاح الإشعارات غير متوفر');
+      }
+
+      await navigator.serviceWorker.register('./awtar-sw.js', {
+        scope: './'
+      });
+
+      const registration = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(Error(
+            'تعذر تشغيل ملف الإشعارات؛ حدّث البرنامج وحاول مرة ثانية'
+          )), 20000)
+        )
+      ]);
+
+      let subscription =
+        await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: keyBytes(result.publicKey)
+        });
+      }
+
+      if (profile?.user_id !== userId ||
+          profile?.role !== 'admin') {
+        throw Error('سجّل دخول المدير مرة ثانية');
+      }
+
+      const saved = await api(
+        '/rest/v1/awtar_push_devices?select=id,subscription'
+      );
+
+      const exists = saved.some(device =>
+        device.subscription?.endpoint === subscription.endpoint
+      );
+
+      if (!exists) {
+        await api('/rest/v1/awtar_push_devices', {
+          user_id: userId,
+          subscription: subscription.toJSON()
+        });
+      }
+
+      alert('تم تفعيل الإشعارات بهذا الجهاز. اضغط تجربة الإشعار للتأكد');
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      working = false;
+      button.disabled = false;
+    }
+  }
+
+  function addPushButtons() {
+    const existing = document.getElementById('awtarPushControls');
+
+    if (profile?.role !== 'admin') {
+      existing?.remove();
+      return;
+    }
+
+    if (existing) return;
+
+    const controls = document.createElement('span');
+    controls.id = 'awtarPushControls';
+    controls.style =
+      'display:inline-flex;gap:8px;flex-wrap:wrap;margin:8px';
+
+    const enable = document.createElement('button');
+    enable.type = 'button';
+    enable.textContent = '🔔 تفعيل الإشعارات';
+    enable.onclick = () => enablePush(enable);
+
+    const test = document.createElement('button');
+    test.type = 'button';
+    test.textContent = 'تجربة الإشعار';
+
+    test.onclick = async () => {
+      test.disabled = true;
+      try {
+        const result = await pushRequest('test');
+        if (!(result.sent > 0)) {
+          throw Error('ما تم إرسال الإشعار؛ فعّل الإشعارات أولاً وحاول مجدداً');
+        }
+        alert('تم إرسال إشعار التجربة؛ تأكد من وصوله');
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        test.disabled = false;
+      }
+    };
+
+    controls.append(enable, test);
+    nav.append(controls);
+  }
+
+  new MutationObserver(addPushButtons)
+    .observe(nav, { childList: true });
+
+  addPushButtons();
+})();
