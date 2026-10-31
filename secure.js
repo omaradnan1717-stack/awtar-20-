@@ -168,5 +168,258 @@ async function recordFund(e, operation) {
       '؛ تحقق من السجل قبل تكرار العملية');
   } finally {
     busy(false);
+  }// تحديث التاريخ والحذف وكشف اليوم
+function awtarToday() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Baghdad',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const value = type => parts.find(p => p.type === type).value;
+  return value('year') + '-' + value('month') + '-' + value('day');
+}
+
+const dailyBeforeDate = sharedDaily;
+sharedDaily = async function () {
+  await dailyBeforeDate();
+  const form = document.getElementById('cloudSpend');
+  if (!form) return;
+
+  if (!form.elements.expense_date) {
+    const box = document.createElement('div');
+    box.innerHTML = `
+      <label>تاريخ المصروف</label>
+      <input type="date" name="expense_date" required>`;
+    box.querySelector('input').value = awtarToday();
+    form.prepend(box);
   }
+
+  const panel = document.createElement('section');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <h2>كشف صرفيات يوم</h2>
+    <label>تاريخ الكشف</label>
+    <input id="dailyReportDate" type="date">
+    <button onclick="loadDailyReport()">عرض الكشف</button>
+    <div id="dailyReportBody"></div>`;
+  app.append(panel);
+  document.getElementById('dailyReportDate').value = awtarToday();
+  await loadDailyReport();
+};
+
+const rowsBeforeDelete = sharedRows;
+sharedRows = function (d) {
+  const html = rowsBeforeDelete(d);
+  if (profile?.role !== 'admin') return html;
+
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  const head = document.createElement('th');
+  head.textContent = 'حذف';
+  box.querySelector('thead tr').append(head);
+
+  const entries = d.entries.slice().reverse();
+  box.querySelectorAll('tbody tr').forEach((row, i) => {
+    if (!entries[i]) return;
+    const cell = document.createElement('td');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'حذف';
+    button.setAttribute(
+      'onclick',
+      'deleteDailyExpense(' + JSON.stringify(entries[i].id) + ')'
+    );
+    cell.append(button);
+    row.append(cell);
+  });
+  return box.innerHTML;
+};
+
+recordFund = async function (e, operation) {
+  e.preventDefault();
+  const form = e.target;
+  const f = new FormData(form);
+  const amount = Number(f.get('amount'));
+  const date = operation === 'spend'
+    ? f.get('expense_date') : awtarToday();
+
+  if (!Number.isSafeInteger(amount) || amount < 1)
+    return alert('المبلغ غير صحيح');
+  if (!date) return alert('حدد تاريخ المصروف');
+  if (!confirm('تأكيد ' +
+      (operation === 'spend' ? 'صرف ' : 'إضافة ') + fmt(amount)))
+    return;
+
+  busy(true);
+  try {
+    await api('/rest/v1/rpc/awtar_cash_record_dated', {
+      request_id: crypto.randomUUID(),
+      operation,
+      amount,
+      item: operation === 'spend' ? f.get('item') : 'تعزيز رصيد',
+      details: f.get('details'),
+      expense_date: date
+    });
+
+    form.reset();
+    if (form.elements.expense_date)
+      form.elements.expense_date.value = date;
+    if (profile.role === 'admin') await refreshAdmin();
+    await refreshFund();
+    alert('تم الحفظ');
+  } catch (x) {
+    alert('لم يتم تأكيد الحفظ: ' + x.message +
+      '؛ تحقق من السجل قبل التكرار');
+  } finally {
+    busy(false);
+  }
+};
+
+async function deleteDailyExpense(id) {
+  if (profile?.role !== 'admin') return;
+  if (!confirm('حذف هذا المصروف وإرجاع مبلغه للرصيد؟')) return;
+  busy(true);
+  try {
+    await api('/rest/v1/rpc/awtar_cash_delete', {
+      request_id: crypto.randomUUID(),
+      entry_id: id
+    });
+    await refreshAdmin();
+    await refreshFund();
+    alert('تم الحذف وإرجاع المبلغ للرصيد');
+  } catch (x) {
+    alert(x.message);
+  } finally {
+    busy(false);
+  }
+}
+
+let currentDailyReport = null;
+let dailyReportRequest = 0;
+
+function makeDailyReport(d, date) {
+  const sum = list => list.reduce(
+    (total, e) => total + Number(e.amount), 0
+  );
+  const rows = d.entries.filter(e => e.date === date);
+  const opening = 3000000 +
+    sum((d.topups || []).filter(e => e.date < date)) -
+    sum(d.entries.filter(e => e.date < date));
+  const topups = sum((d.topups || []).filter(e => e.date === date));
+  const spent = sum(rows);
+  return {
+    date, rows, opening, topups, spent,
+    closing: opening + topups - spent
+  };
+}
+
+async function loadDailyReport() {
+  const date = document.getElementById('dailyReportDate')?.value;
+  if (!date) return;
+  const request = ++dailyReportRequest;
+  try {
+    const d = await api('/rest/v1/rpc/awtar_cash_summary', {});
+    const body = document.getElementById('dailyReportBody');
+    if (!body || request !== dailyReportRequest ||
+        document.getElementById('dailyReportDate').value !== date)
+      return;
+
+    currentDailyReport = makeDailyReport(d, date);
+    body.innerHTML = reportDailyHTML(currentDailyReport) + `
+      <p>
+        <button onclick="printDailyReport()">طباعة الكشف</button>
+        <button onclick="whatsappDailyReport()">إرسال عبر الواتساب</button>
+      </p>`;
+  } catch (e) {
+    currentDailyReport = null;
+    const body = document.getElementById('dailyReportBody');
+    if (body) body.textContent = 'تعذر تحميل الكشف: ' + e.message;
+  }
+}
+
+function reportDailyHTML(r) {
+  return `
+    <h2>مطعم وكافيه أوتار</h2>
+    <h3>كشف الصرفيات اليومية — ${esc(r.date)}</h3>
+    <p>الرصيد قبل اليوم: ${fmt(r.opening)}</p>
+    <p>تعزيز الرصيد خلال اليوم: ${fmt(r.topups)}</p>
+    ${rowsBeforeDelete({ entries: r.rows })}
+    <p><strong>مجموع صرف اليوم: ${fmt(r.spent)}</strong></p>
+    <p><strong>الرصيد بنهاية اليوم: ${fmt(r.closing)}</strong></p>
+    <small>حسب العمليات الموجودة وقت إعداد الكشف</small>`;
+}
+
+function selectedDailyReport() {
+  const date = document.getElementById('dailyReportDate')?.value;
+  if (!currentDailyReport || currentDailyReport.date !== date) {
+    alert('اضغط عرض الكشف أولاً');
+    return null;
+  }
+  return currentDailyReport;
+}
+
+function whatsappDailyReport() {
+  const r = selectedDailyReport();
+  if (!r) return;
+  const text = [
+    'مطعم وكافيه أوتار',
+    'كشف صرفيات ' + r.date,
+    'الرصيد قبل اليوم: ' + fmt(r.opening),
+    'تعزيز اليوم: ' + fmt(r.topups),
+    ...r.rows.map((e, i) =>
+      (i + 1) + '. ' + e.category +
+      ' — ' + e.note +
+      ' — ' + fmt(e.amount) +
+      ' — ' + e.actorName
+    ),
+    r.rows.length ? '' : 'لا توجد صرفيات بهذا اليوم',
+    'مجموع الصرف: ' + fmt(r.spent),
+    'المتبقي بنهاية اليوم: ' + fmt(r.closing)
+  ].filter(Boolean).join('\n');
+
+  window.open(
+    'https://wa.me/?text=' + encodeURIComponent(text),
+    '_blank', 'noopener'
+  );
+}
+
+function printDailyReport() {
+  const r = selectedDailyReport();
+  if (!r) return;
+  document.getElementById('dailyPrintFrame')?.remove();
+  const frame = document.createElement('iframe');
+  frame.id = 'dailyPrintFrame';
+  frame.style =
+    'position:fixed;width:1px;height:1px;left:-10000px;border:0';
+  frame.onload = () => {
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  };
+  frame.srcdoc = `
+    <!doctype html>
+    <html lang="ar" dir="rtl">
+    <head>
+      <meta charset="utf-8">
+      <title>كشف الصرفيات اليومية</title>
+      <style>
+        body {font:14px Arial;padding:20px;color:#111}
+        table {border-collapse:collapse;width:100%}
+        td,th {
+          border:1px solid #999;padding:8px;
+          text-align:right;overflow-wrap:anywhere
+        }
+        h2 {text-align:center}
+        @page {size:A4;margin:12mm}
+      </style>
+    </head>
+    <body>${reportDailyHTML(r)}</body>
+    </html>`;
+  document.body.append(frame);
+}
+
+const refreshBeforeReport = refreshFund;
+refreshFund = async function () {
+  await refreshBeforeReport();
+  if (document.getElementById('dailyReportBody'))
+    await loadDailyReport();
+};
 }
