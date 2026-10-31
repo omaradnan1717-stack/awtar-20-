@@ -424,3 +424,50 @@ refreshFund = async function () {
   if (document.getElementById('dailyReportBody'))
     await loadDailyReport();
 };
+printDailyReport = function () {
+  const r = selectedDailyReport();
+  if (!r) return;
+
+  document.getElementById('awtarPrintArea')?.remove();
+  document.getElementById('awtarPrintStyle')?.remove();
+
+  const area = document.createElement('section');
+  area.id = 'awtarPrintArea';
+  area.dir = 'rtl';
+  area.innerHTML = reportDailyHTML(r);
+  area.style.display = 'none';
+
+  const style = document.createElement('style');
+  style.id = 'awtarPrintStyle';
+  style.textContent = `
+    @media print {
+      body > *:not(#awtarPrintArea) {
+        display: none !important;
+      }
+      #awtarPrintArea {
+        display: block !important;
+        color: #000;
+        background: #fff;
+        font: 14px Arial;
+      }
+      #awtarPrintArea .scroll {
+        overflow: visible !important;
+      }
+      #awtarPrintArea table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      #awtarPrintArea td,
+      #awtarPrintArea th {
+        border: 1px solid #999;
+        padding: 7px;
+        text-align: right;
+      }
+      @page { size: A4; margin: 12mm; }
+    }
+  `;
+
+  document.head.append(style);
+  document.body.append(area);
+  window.print();
+};
