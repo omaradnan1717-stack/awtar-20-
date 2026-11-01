@@ -1405,3 +1405,215 @@ sharedDaily = async function() {
     return root.innerHTML;
   };
 })();
+
+/* Private, shared invoice attachments. Accounting balances are never changed. */
+(() => {
+  const bucket = 'awtar-invoices';
+  let currentParty = null;
+  let uploading = false;
+  let requestGeneration = 0;
+  const mimeExtensions = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/heic':'heic','image/heif':'heif','application/pdf':'pdf'};
+  const previousParties = parties;
+  parties = function(type) {
+    const root = document.createElement('div');
+    root.innerHTML = previousParties.apply(this, arguments);
+    for (const form of root.querySelectorAll('form[onsubmit]')) {
+      const handler = form.getAttribute('onsubmit') || '';
+      if (!handler.includes('addMovement(')) continue;
+      const p = db.parties.find(p => p.type === type &&
+        (handler.includes("'" + p.id + "'") || handler.includes('"' + p.id + '"')));
+      if (!p) continue;
+      const card = form.closest('.panel');
+      if (!card || card.querySelector('[data-invoice-party]')) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'no-print';
+      button.dataset.invoiceParty = p.id;
+      button.textContent = '📎 فواتير المكتب';
+      button.style.cssText = 'margin-top:12px;margin-bottom:8px';
+      form.before(button);
+    }
+    return root.innerHTML;
+  };
+  function invoiceAccounts() {
+    return profile?.role === 'admin' ? db.parties : accounts;
+  }
+  const employeeBeforeInvoices = employee;
+  employee = async function() {
+    await employeeBeforeInvoices.apply(this, arguments);
+    if (profile?.role !== 'employee') return;
+    const panel = document.createElement('section');
+    panel.className = 'panel';
+    panel.innerHTML = '<h2>📎 فواتير المكاتب</h2><p>اختَر الحساب لرفع فاتورة أو فتح الفواتير المحفوظة. رفع الفاتورة لا يغيّر رصيد الدين.</p>';
+    if (!accounts.length) panel.insertAdjacentHTML('beforeend','<p>لا توجد حسابات متاحة حالياً.</p>');
+    for (const p of accounts) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.invoiceParty = p.id;
+      button.textContent = '📎 ' + p.name;
+      button.style.cssText = 'display:block;margin:8px 0;min-height:44px';
+      panel.append(button);
+    }
+    app.append(panel);
+  };
+  function closeInvoices() {
+    if (uploading) return alert('انتظر اكتمال رفع الفاتورة أولاً.');
+    requestGeneration++;
+    document.getElementById('awtarInvoiceView')?.remove();
+    currentParty = null;
+  }
+  async function storageRequest(path, options = {}) {
+    const response = await fetch(cfg.url + '/storage/v1/' + path, {
+      ...options,
+      headers: {apikey:cfg.key, Authorization:'Bearer ' + session.access_token, ...(options.headers || {})}
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw Error(result.message || result.error || 'تعذر حفظ أو فتح الفاتورة');
+    return result;
+  }
+  function ready() {
+    if (!['admin','employee'].includes(profile?.role) || !session?.access_token) throw Error('سجّل الدخول بحساب مخوّل.');
+  }
+  async function loadInvoices(partyId) {
+    const generation = ++requestGeneration;
+    const list = document.getElementById('awtarInvoiceList');
+    list.textContent = 'جارٍ تحميل الفواتير…';
+    try {
+      const rows = await api('/rest/v1/awtar_invoices?party_id=eq.' + encodeURIComponent(partyId) + '&select=*&order=invoice_date.desc,created_at.desc');
+      if (generation !== requestGeneration || currentParty !== partyId) return;
+      list.innerHTML = rows.length ? rows.map(r => `<article class="panel" style="margin-top:10px">
+        <b>${esc(r.invoice_number || 'فاتورة بدون رقم')}</b> — ${esc(datefmt(r.invoice_date))}
+        <p>${r.amount == null ? '' : 'المبلغ: ' + fmt(r.amount)}</p>
+        <p>${esc(r.original_name)} — ${(r.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
+        ${r.note ? '<p>' + esc(r.note) + '</p>' : ''}
+        <button type="button" data-invoice-open="${esc(r.object_path)}">فتح الفاتورة</button>
+        <button type="button" data-invoice-download="${esc(r.object_path)}">تنزيل الفاتورة</button>
+        </article>`).join('') : '<p>ماكو فواتير محفوظة لهذا الحساب بعد.</p>';
+    } catch (error) {
+      if (generation !== requestGeneration || currentParty !== partyId) return;
+      list.textContent = 'تعذر تحميل الفواتير: ' + error.message + ' — إذا كانت أول مرة، شغّل ملف invoices-setup.sql ثم اضغط تحديث.';
+    }
+  }
+  async function showInvoices(partyId) {
+    ready();
+    if (uploading) return;
+    const p = invoiceAccounts().find(p => p.id === partyId);
+    if (!p) throw Error('الحساب غير موجود');
+    closeInvoices();
+    currentParty = partyId;
+    const view = document.createElement('section');
+    view.id = 'awtarInvoiceView';
+    view.setAttribute('role','dialog');
+    view.setAttribute('aria-modal','true');
+    view.setAttribute('aria-label','فواتير ' + p.name);
+    view.style.cssText = 'position:fixed;inset:0;background:#f3f6f5;z-index:10001;overflow:auto;padding:16px;box-sizing:border-box;direction:rtl';
+    view.innerHTML = `<div style="max-width:760px;margin:auto"><div class="panel">
+      <button type="button" data-invoice-close>رجوع للحساب</button>
+      <h2>📎 فواتير ${esc(p.name)}</h2>
+      <p>الفواتير محفوظة مع الحساب وتظهر من أجهزتك عند دخولك بحساب مخوّل.</p>
+      <p>حفظ الفاتورة لا يسجّل ديناً أو مصروفاً؛ سجّل الحركة المالية من الحساب عند الحاجة.</p>
+      <form id="awtarInvoiceUpload">
+      <div><label>رقم الفاتورة (اختياري)</label><input name="invoice_number" maxlength="100"></div>
+      <div><label>تاريخ الفاتورة</label><input name="invoice_date" type="date" value="${awtarToday()}" required></div>
+      <div><label>مبلغ الفاتورة — دينار عراقي (اختياري)</label><input name="invoice_amount" type="number" min="0" step="1"></div>
+      <div><label>ملاحظات (اختياري)</label><input name="invoice_note" maxlength="500"></div>
+      <div><label>من الاستوديو أو ملف PDF — حتى 10 ميغابايت</label><input name="invoice_file" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.heic,.heif"></div>
+      <div><label>أو صوّر الفاتورة بالكاميرا</label><input name="invoice_camera" type="file" accept="image/*" capture="environment"></div>
+      <p id="awtarInvoiceChosen" role="status"></p>
+      <button type="submit">حفظ الفاتورة</button><p id="awtarInvoiceStatus" role="status"></p>
+      </form></div><div class="panel"><button type="button" data-invoice-refresh>تحديث الفواتير</button><div id="awtarInvoiceList"></div></div></div>`;
+    document.body.append(view);
+    const form = view.querySelector('form');
+    for (const name of ['invoice_file','invoice_camera']) {
+      form.elements[name].addEventListener('change', () => {
+        const other = name === 'invoice_file' ? 'invoice_camera' : 'invoice_file';
+        if (form.elements[name].files.length) form.elements[other].value = '';
+        view.querySelector('#awtarInvoiceChosen').textContent = form.elements[name].files[0]?.name || '';
+      });
+    }
+    form.addEventListener('submit', uploadInvoice);
+    await loadInvoices(partyId);
+  }
+  async function uploadInvoice(event) {
+    event.preventDefault();
+    if (uploading) return;
+    const form = event.target;
+    const status = document.getElementById('awtarInvoiceStatus');
+    let uploadedPath = null;
+    let metadataAttempted = false;
+    try {
+      ready();
+      const partyId = currentParty;
+      if (!invoiceAccounts().some(p => p.id === partyId)) throw Error('الحساب غير موجود');
+      const file = form.elements.invoice_file.files[0] || form.elements.invoice_camera.files[0];
+      if (!file) throw Error('اختَر صورة أو PDF للفاتورة أولاً');
+      if (!file.size || file.size > 10485760) throw Error('حجم الملف لازم يكون أكثر من صفر وبحد أقصى 10 ميغابايت');
+      const fallback = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',pdf:'application/pdf'};
+      const mime = file.type || fallback[file.name.split('.').pop().toLowerCase()];
+      if (!mimeExtensions[mime]) throw Error('اختَر صورة JPG أو PNG أو WEBP أو HEIC أو ملف PDF');
+      const data = new FormData(form);
+      const value = String(data.get('invoice_amount') || '').trim();
+      const amount = value === '' ? null : Number(value);
+      if (amount !== null && (!Number.isSafeInteger(amount) || amount < 0)) throw Error('أدخل مبلغاً صحيحاً');
+      const date = data.get('invoice_date');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error('أدخل تاريخ الفاتورة');
+      uploading = true;
+      form.querySelector('button[type=submit]').disabled = true;
+      status.textContent = 'جارٍ رفع وحفظ الفاتورة… لا تغلق الصفحة.';
+      const invoiceId = crypto.randomUUID();
+      const objectPath = session.user.id + '/' + invoiceId + '.' + mimeExtensions[mime];
+      await storageRequest('object/' + bucket + '/' + objectPath, {method:'POST',headers:{'Content-Type':mime,'x-upsert':'false'},body:file});
+      uploadedPath = objectPath;
+      const record = {id:invoiceId,party_id:partyId,invoice_number:String(data.get('invoice_number') || '').trim(),invoice_date:date,amount,note:String(data.get('invoice_note') || '').trim(),object_path:objectPath,original_name:file.name,mime_type:mime,size_bytes:file.size};
+      metadataAttempted = true;
+      try {
+        await api('/rest/v1/awtar_invoices',record);
+      } catch (error) {
+        // A response may be lost after commit: confirm the same ID before cleanup.
+        let confirmed;
+        try {confirmed = await api('/rest/v1/awtar_invoices?id=eq.' + invoiceId + '&select=id');}
+        catch (_) {throw Error('تعذر تأكيد الحفظ. اضغط تحديث الفواتير بعد رجوع الاتصال قبل إعادة الرفع.');}
+        if (!confirmed.length) {
+          metadataAttempted = false;
+          throw error;
+        }
+      }
+      uploadedPath = null;
+      form.reset();
+      form.elements.invoice_date.value = awtarToday();
+      document.getElementById('awtarInvoiceChosen').textContent = '';
+      status.textContent = 'تم حفظ الفاتورة ✅';
+      await loadInvoices(partyId);
+    } catch (error) {
+      if (uploadedPath && !metadataAttempted) {
+        try {await storageRequest('object/' + bucket,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefixes:[uploadedPath]})});} catch (_) {}
+      }
+      status.textContent = 'لم يتم تأكيد الحفظ: ' + error.message;
+    } finally {
+      uploading = false;
+      form.querySelector('button[type=submit]').disabled = false;
+    }
+  }
+  document.addEventListener('click', async event => {
+    const target = event.target.closest('button');
+    if (!target) return;
+    try {
+      if (target.hasAttribute('data-invoice-party')) return await showInvoices(target.dataset.invoiceParty);
+      if (target.hasAttribute('data-invoice-close')) return closeInvoices();
+      if (target.hasAttribute('data-invoice-refresh')) {ready();return await loadInvoices(currentParty);}
+      const path = target.dataset.invoiceOpen || target.dataset.invoiceDownload;
+      if (!path) return;
+      ready();
+      // Open synchronously so Safari permits the new tab.
+      const popup = window.open('about:blank','_blank');
+      if (!popup) throw Error('اسمح بفتح النوافذ لهذا الموقع ثم أعد المحاولة');
+      try {
+        popup.opener = null;
+        const result = await storageRequest('object/sign/' + bucket + '/' + path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expiresIn:300})});
+        let url = cfg.url + '/storage/v1' + result.signedURL;
+        if (target.dataset.invoiceDownload) url += '&download=';
+        popup.location.href = url;
+      } catch(error) {popup.close();throw error;}
+    } catch(error) {alert(error.message);}
+  });
+})();
