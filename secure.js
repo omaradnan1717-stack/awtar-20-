@@ -1362,3 +1362,34 @@ sharedDaily = async function() {
   }
 };
 
+
+/* Direct calling for saved debt contacts; does not alter stored data. */
+(() => {
+  if (window.awtarDebtCallInstalled) return;
+  window.awtarDebtCallInstalled = true;
+  function phoneForCall(value) {
+    let n = String(value || '').trim()
+      .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+    if (!/^[+\d\s().-]+$/.test(n)) return '';
+    n = n.replace(/[\s().-]/g, '');
+    if (n.startsWith('00')) n = '+' + n.slice(2);
+    if (n.startsWith('964')) n = '+' + n;
+    return /^\+?\d{7,15}$/.test(n) ? n : '';
+  }
+  const previous = parties;
+  parties = function(type) {
+    let html = previous(type);
+    if (type !== 'debt') return html;
+    for (const p of db.parties.filter(p => p.type === 'debt')) {
+      const number = phoneForCall(p.phone);
+      if (!number) continue;
+      const marker = '<button class="light" onclick="printParty(\'' + p.id + '\')">';
+      html = html.replace(marker,
+        '<a class="btn" style="text-decoration:none;display:inline-block" href="tel:' +
+        number + '" aria-label="اتصال بـ ' + esc(p.name) + '">📞 اتصال</a>' + marker);
+    }
+    return html;
+  };
+})();
+
