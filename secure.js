@@ -1301,3 +1301,64 @@ removeEntry = function (id) {
     );
   return removeEntryBeforeDailyV2(id);
 };
+
+/* Fund accounting v3: main cash and petty cash are separate assets. */
+function awtarAutomaticReturn(e) {
+  return !!e.dailyReturnDate && e.id === 'daily_return_' + e.dailyReturnDate;
+}
+function awtarCashPosition(state) {
+  const rows = (state.entries || []).filter(e => !awtarAutomaticReturn(e));
+  const total = rows.reduce((s,e) => s + (e.method === 'نقدي'
+    ? (e.type === 'income' ? 1 : e.type === 'expense' ? -1 : 0) * Number(e.amount) : 0),0);
+  const fund = state.dailyFund || {};
+  const held = Object.values(fund.days || {}).reduce((s,d) =>
+    s + (!d.closed ? Number(d.remaining || 0) : 0),0);
+  return {total, held, main: total - held};
+}
+function awtarWithoutReturns(fn) {
+  return function(...args) {
+    const original = db.entries;
+    db.entries = original.filter(e => !awtarAutomaticReturn(e));
+    try { return fn.apply(this,args); } finally { db.entries = original; }
+  };
+}
+cashBalance = function() { return awtarCashPosition(db).main; };
+home = awtarWithoutReturns(home);
+const awtarHomeBeforeFunds = home;
+home = function() {
+  const p = awtarCashPosition(db);
+  return awtarHomeBeforeFunds() +
+    '<section class="panel"><h2>توزيع النقد المسجّل</h2><div class="cards">' +
+    stat('الموجود بعهدة الصرف',p.held) + stat('النقد الكلي: الصندوق والعهدة',p.total) +
+    '</div><p class="muted">تخصيص العهدة تحويل داخلي. المتبقي يرجع للصندوق دون احتسابه إيراداً جديداً. الأرصدة مبنية على الحركات المسجّلة.</p>' +
+    (db.dailyFund?.accountingVersion === 3 ? '' :
+    '<p class="notice">حساب الإيرادات يستبعد ترحيل العهدة الآلي. يلزم تشغيل تحديث قاعدة البيانات fund-accounting-v3.sql لإيقاف التمويل اليومي التلقائي وتصحيح السجل المشترك.</p>') +
+    (p.main < 0 ? '<p class="notice">الصندوق المسجّل لا يغطي عهدة الصرف. راجع إيرادات النقد والرصيد السابق والمبالغ المسلّمة فعلياً؛ لا تضف إيرادات وهمية لتسوية الفرق.</p>' : '') +
+    '</section>';
+};
+ledger = awtarWithoutReturns(ledger);
+showReport = awtarWithoutReturns(showReport);
+exportCSV = awtarWithoutReturns(exportCSV);
+printLedger = awtarWithoutReturns(printLedger);
+const awtarDailyHTMLBeforeAccounting = reportDailyHTML;
+reportDailyHTML = function(r) {
+  return awtarDailyHTMLBeforeAccounting(r)
+    .replace('تم ترحيل المتبقي إلى الإيرادات:', 'المتبقي المعاد إلى الصندوق (تحويل داخلي):')
+    .replace('يُرحّل المتبقي إلى الإيرادات بعد انتهاء اليوم.', 'يعود المتبقي إلى الصندوق بعد انتهاء اليوم، ولا يزيد الإيرادات.');
+};
+const awtarDailyBeforeAccounting = sharedDaily;
+sharedDaily = async function() {
+  await awtarDailyBeforeAccounting();
+  const opening = document.getElementById('openingForm');
+  if (opening) {
+    opening.querySelector('h3').textContent = 'المبلغ المسلّم من الصندوق لعهدة اليوم';
+    opening.querySelector('p').textContent = 'اكتب مجموع عهدة بداية اليوم الفعلية. تغيير المبلغ يصحح التحويل، ولا يسجّل مصروفاً. للتمويل اللاحق استخدم تعزيز العهدة.';
+    opening.querySelector('button').textContent = 'حفظ مبلغ العهدة';
+  }
+  const top = document.getElementById('cloudTopup');
+  if (top) {
+    top.closest('section').querySelector('h2').textContent = 'تعزيز العهدة من الصندوق — للمدير';
+    top.querySelector('button').textContent = 'تحويل المبلغ للعهدة';
+  }
+};
+
