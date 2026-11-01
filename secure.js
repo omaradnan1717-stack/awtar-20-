@@ -1363,34 +1363,45 @@ sharedDaily = async function() {
 };
 
 
-/* Direct calling for saved debt contacts; does not alter stored data. */
+/* Contact calling v2: attach to each account card, independently of print markup. */
 (() => {
-  if (window.awtarDebtCallInstalled) return;
-  window.awtarDebtCallInstalled = true;
   function phoneForCall(value) {
-    let n = String(value || '').trim()
+    let n = String(value ?? '').trim()
       .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
-    if (!/^[+\d\s().-]+$/.test(n)) return '';
-    n = n.replace(/[\s().-]/g, '');
+      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+      .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+      .replace(/[\s().\-–—]/g, '');
     if (n.startsWith('00')) n = '+' + n.slice(2);
-    if (n.startsWith('964')) n = '+' + n;
+    if (/^9640?7\d{9}$/.test(n)) n = '+964' + n.replace(/^9640?/, '');
+    if (/^\+96407\d{9}$/.test(n)) n = '+964' + n.slice(5);
+    if (/^07\d{9}$/.test(n)) n = '+964' + n.slice(1);
+    if (/^7\d{9}$/.test(n)) n = '+964' + n;
     return /^\+?\d{7,15}$/.test(n) ? n : '';
   }
   const previous = parties;
   parties = function(type) {
-    let html = previous(type);
-    if (!['debt', 'supplier', 'advance'].includes(type)) return html;
-    for (const p of db.parties.filter(p => p.type === type)) {
-      const number = phoneForCall(p.phone);
+    const html = previous.apply(this, arguments);
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    for (const form of root.querySelectorAll('form[onsubmit]')) {
+      const handler = form.getAttribute('onsubmit') || '';
+      if (!handler.includes('addMovement(')) continue;
+      const p = db.parties.find(p => p.type === type &&
+        (handler.includes("'" + p.id + "'") || handler.includes('"' + p.id + '"')));
+      const number = p && phoneForCall(p.phone);
       if (!number) continue;
-      const marker = '<button class="light" onclick="printParty(\'' + p.id + '\')">';
-      html = html.replace(marker,
-        '<a class="btn" style="text-decoration:none;display:inline-block" href="tel:' +
-        number + '" aria-label="اتصال بـ ' + esc(p.name) + '">📞 اتصال</a>' + marker);
+      const card = form.closest('.panel');
+      const header = card && card.querySelector('.topline');
+      if (!header || header.querySelector('[data-awtar-call]')) continue;
+      const link = document.createElement('a');
+      link.className = 'btn no-print';
+      link.dataset.awtarCall = p.id;
+      link.href = 'tel:' + number;
+      link.textContent = '📞 اتصال';
+      link.setAttribute('aria-label', 'اتصال بـ ' + p.name);
+      link.style.cssText = 'display:inline-block;text-decoration:none;background:#19685e;color:#fff;padding:10px 16px;border-radius:12px;margin:8px;min-height:44px;box-sizing:border-box';
+      (header.querySelector('h3')?.parentElement || header).append(link);
     }
-    return html;
+    return root.innerHTML;
   };
 })();
-
-
