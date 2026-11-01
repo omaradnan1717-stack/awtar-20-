@@ -1380,8 +1380,8 @@ sharedDaily = async function() {
   const previous = parties;
   parties = function(type) {
     let html = previous(type);
-    if (type !== 'debt') return html;
-    for (const p of db.parties.filter(p => p.type === 'debt')) {
+    if (!['debt', 'supplier', 'advance'].includes(type)) return html;
+    for (const p of db.parties.filter(p => p.type === type)) {
       const number = phoneForCall(p.phone);
       if (!number) continue;
       const marker = '<button class="light" onclick="printParty(\'' + p.id + '\')">';
@@ -1392,4 +1392,5 @@ sharedDaily = async function() {
     return html;
   };
 })();
+
 
