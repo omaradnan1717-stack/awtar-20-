@@ -9,7 +9,7 @@
   parties=function(type){if(['supplier','advance'].includes(type))return '';return beforeParties(type);};
   async function request(action,extra={}) {
     if(!allowed())throw Error('سجّل الدخول أولاً');
-    return api('/functions/v1/awtar-notify',{action,...extra});
+    return api('/functions/v1/Awtar-notify',{action,...extra});
   }
   function keyBytes(s){const v=s.replace(/-/g,'+').replace(/_/g,'/');return Uint8Array.from(atob(v+'='.repeat((4-v.length%4)%4)),c=>c.charCodeAt(0));}
   function status(s){const el=document.getElementById('awtarNotifyStatus');if(el)el.textContent=s;}
