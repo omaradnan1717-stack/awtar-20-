@@ -49,8 +49,7 @@
     event.preventDefault();if(sending)return;
     if(sessionStorage.getItem(pendingKey()))return alert('أكمل تأكيد الوصل المعلّق من أسفل الصفحة أولاً.');
     const file=form.elements.receipt_file.files[0]||form.elements.receipt_camera.files[0],f=new FormData(form),kind=f.get('payment_kind');
-    if(kind==='cash'&&!file)return oldRecord.apply(this,arguments);
-    if(!file)return alert('أرفق صورة الوصل للشراء الآجل');
+    if(!file)return alert('أرفق صورة الوصل قبل حفظ الشراء.');
     const mime=file.type.toLowerCase()||(/\.heic$/i.test(file.name)?'image/heic':/\.heif$/i.test(file.name)?'image/heif':'');
     if(!types[mime]||file.size<1||file.size>10485760)return alert('اختر صورة أو PDF بحجم لا يتجاوز 10 MB');
     const amount=Number(f.get('amount')),date=f.get('expense_date')||awtarToday();
@@ -72,6 +71,46 @@
     }catch(e){alert((committed?'العملية محفوظة؛ حدّث العرض. ':'لم يتم تأكيد الحفظ؛ استخدم تأكيد الوصل المعلّق إن ظهر. ')+e.message);await mountList();}
     finally{sending=false;busy(false);}
   };
+  async function openReceiptFile(resolvePath) {
+    const win = window.open('', '_blank');
+    if (!win) return alert('اسمح بفتح النافذة لعرض الوصل');
+    try {
+      win.opener = null;
+      const path = await resolvePath();
+      if (win.closed) return;
+      if (!path) {
+        win.close();
+        return alert('ماكو صورة وصل مرفقة بهذا الصرف.');
+      }
+      const result = await storage('object/sign/' + bucket + '/' + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresIn: 300 })
+      });
+      if (!result.signedURL?.startsWith('/object/sign/')) {
+        throw Error('تعذر الحصول على رابط صورة الوصل');
+      }
+      if (!win.closed) win.location.href = cfg.url + '/storage/v1' + result.signedURL;
+    } catch (error) {
+      if (!win.closed) {
+        win.close();
+        alert('تعذر فتح صورة الوصل: ' + error.message);
+      }
+    }
+  }
+
+  openExpenseReceipt = function (button) {
+    const entry = JSON.parse(button.dataset.expenseReceipt);
+    return openReceiptFile(async () => {
+      // Cash receipts and their expense entries share the same request ID.
+      const receiptId = entry.receiptId || entry.id;
+      if (!receiptId) return null;
+      const rows = await api('/rest/v1/awtar_daily_receipts?select=object_path' +
+        '&payment_kind=eq.cash&id=eq.' + encodeURIComponent(receiptId) + '&limit=1');
+      return rows[0]?.object_path;
+    });
+  };
+
   document.addEventListener('click',async event=>{
     const button=event.target.closest('[data-receipt-refresh],[data-receipt-resume],[data-receipt-open]');if(!button)return;
     if(button.hasAttribute('data-receipt-refresh'))return loadList();
@@ -79,8 +118,6 @@
       if(sending)return;sending=true;busy(true);
       try{await commitPending();if(profile.role==='admin')await refreshAdmin();await refreshFund();await mountList();alert('تم تأكيد الحفظ بدون تكرار');}catch(e){alert('لم يُؤكد الحفظ: '+e.message);}finally{sending=false;busy(false);}return;
     }
-    const win=window.open('','_blank');
-    if(!win)return alert('اسمح بفتح النافذة لعرض الوصل');
-    try{win.opener=null;const r=await storage('object/sign/'+bucket+'/'+button.dataset.receiptOpen,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expiresIn:300})});win.location.href=cfg.url+'/storage/v1'+r.signedURL;}catch(e){win.close();alert(e.message);}
+    return openReceiptFile(() => button.dataset.receiptOpen);
   });
 })();
