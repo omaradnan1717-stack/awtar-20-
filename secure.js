@@ -128,38 +128,53 @@ function sharedRows(d, showReceipts = false) {
 
 function openExpenseReceipt(button) {
   const entry = JSON.parse(button.dataset.expenseReceipt);
-  const receipt = window.open('', '_blank');
-  if (!receipt) return alert('اسمح بفتح النوافذ لعرض وصل الصرف');
-  receipt.opener = null;
-  receipt.document.open();
-  receipt.document.write(`<!doctype html>
-    <html lang="ar" dir="rtl"><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>وصل صرف نقدي | أوتار</title>
+  const dialog = document.createElement('dialog');
+  dialog.id = 'expenseReceiptDialog';
+  dialog.dir = 'rtl';
+  dialog.setAttribute('aria-labelledby', 'expenseReceiptTitle');
+  dialog.innerHTML = `
     <style>
-      body {font: 16px system-ui, sans-serif; margin: 24px; color: #111}
-      main {max-width: 480px; margin: auto; border: 1px solid #aaa; padding: 20px}
-      h1, h2 {text-align: center}
-      h1 {font-size: 1.2rem}
-      dt {font-weight: bold; margin-top: 12px}
-      dd {margin: 4px 0; overflow-wrap: anywhere}
-      button {font: inherit; padding: 8px 16px; margin-top: 12px}
-      @media print {button {display: none}}
-    </style></head><body><main>
-      <h1>مطعم وكافيه أوتار</h1>
-      <h2>وصل صرف نقدي</h2>
-      <dl>
-        <dt>رقم الوصل</dt><dd dir="ltr">${esc(entry.id)}</dd>
-        <dt>التاريخ</dt><dd>${esc(datefmt(entry.date))}</dd>
-        <dt>المادة / وجه الصرف</dt><dd>${esc(entry.category)}</dd>
-        <dt>التفاصيل</dt><dd>${esc(entry.note)}</dd>
-        <dt>المبلغ</dt><dd>${esc(fmt(entry.amount))}</dd>
-        <dt>سجّله</dt><dd>${esc(entry.actorName || '—')}</dd>
-      </dl>
-      <button type="button" id="printReceipt">طباعة الوصل</button>
-    </main></body></html>`);
-  receipt.document.close();
-  receipt.document.getElementById('printReceipt').onclick = () => receipt.print();
+      #expenseReceiptDialog {
+        width: min(92vw, 480px); max-height: 85vh; overflow: auto;
+        padding: 20px; border: 1px solid #aaa; border-radius: 12px;
+        color: #111; background: white;
+      }
+      #expenseReceiptDialog::backdrop { background: #0008; }
+      #expenseReceiptDialog h2, #expenseReceiptDialog header {
+        text-align: center; margin: 0 0 12px;
+      }
+      #expenseReceiptDialog header { color: inherit; background: none; padding: 0; }
+      #expenseReceiptDialog dt { font-weight: bold; margin-top: 10px; }
+      #expenseReceiptDialog dd { margin: 4px 0; overflow-wrap: anywhere; }
+      #expenseReceiptDialog form { display: flex; flex-wrap: wrap; gap: 8px; }
+      @media print {
+        body > :not(#expenseReceiptDialog) { display: none !important; }
+        #expenseReceiptDialog {
+          position: static; width: auto; max-width: none; max-height: none;
+          overflow: visible; margin: 0; border: 0; padding: 0;
+        }
+        #expenseReceiptDialog::backdrop { display: none; }
+        #expenseReceiptDialog form { display: none !important; }
+      }
+    </style>
+    <form method="dialog">
+      <button type="submit" autofocus>إغلاق والرجوع</button>
+      <button type="button" id="printExpenseReceipt">طباعة الوصل</button>
+    </form>
+    <header>مطعم وكافيه أوتار</header>
+    <h2 id="expenseReceiptTitle">وصل صرف نقدي</h2>
+    <dl>
+      <dt>رقم الوصل</dt><dd dir="ltr">${esc(entry.id)}</dd>
+      <dt>التاريخ</dt><dd>${esc(datefmt(entry.date))}</dd>
+      <dt>المادة / وجه الصرف</dt><dd>${esc(entry.category)}</dd>
+      <dt>التفاصيل</dt><dd>${esc(entry.note)}</dd>
+      <dt>المبلغ</dt><dd>${esc(fmt(entry.amount))}</dd>
+      <dt>سجّله</dt><dd>${esc(entry.actorName || '—')}</dd>
+    </dl>`;
+  dialog.querySelector('#printExpenseReceipt').onclick = () => window.print();
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 async function refreshFund() {
