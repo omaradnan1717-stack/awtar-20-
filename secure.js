@@ -126,6 +126,86 @@ function sharedRows(d, showReceipts = false) {
     </tbody></table></div>`;
 }
 
+function expenseReceiptImage(receipt) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const width = 420;
+  const margin = 24;
+  const lineHeight = 26;
+  const font = 'system-ui, -apple-system, sans-serif';
+  const fields = [];
+  let height = 116;
+  for (const label of receipt.querySelectorAll('dt')) {
+    const value = label.nextElementSibling;
+    ctx.font = '18px ' + font;
+    const lines = [];
+    for (const paragraph of value.textContent.split(/\r?\n/)) {
+      let line = '';
+      for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+        const combined = line ? line + ' ' + word : word;
+        if (ctx.measureText(combined).width <= width - margin * 2) {
+          line = combined;
+          continue;
+        }
+        if (line) lines.push(line);
+        line = '';
+        for (const char of word) {
+          if (ctx.measureText(line + char).width > width - margin * 2) {
+            lines.push(line);
+            line = '';
+          }
+          line += char;
+        }
+      }
+      lines.push(line);
+    }
+    fields.push({ label: label.textContent, lines, direction: value.dir || 'rtl' });
+    height += 48 + lines.length * lineHeight;
+  }
+
+  const scale = 2;
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#17685c';
+  ctx.fillRect(0, 0, width, 100);
+  ctx.fillStyle = '#ffffff';
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+  ctx.font = '18px ' + font;
+  ctx.fillText(receipt.querySelector('header').textContent, width / 2, 38);
+  ctx.font = 'bold 24px ' + font;
+  ctx.fillText(receipt.querySelector('h2').textContent, width / 2, 72);
+
+  let y = 132;
+  ctx.textAlign = 'right';
+  for (const field of fields) {
+    ctx.direction = 'rtl';
+    ctx.fillStyle = '#17685c';
+    ctx.font = 'bold 15px ' + font;
+    ctx.fillText(field.label, width - margin, y);
+    y += 27;
+    ctx.direction = field.direction;
+    ctx.fillStyle = '#203134';
+    ctx.font = '18px ' + font;
+    for (const line of field.lines) {
+      ctx.fillText(line, width - margin, y);
+      y += lineHeight;
+    }
+    y += 21;
+  }
+  const image = new Image();
+  image.className = 'expense-receipt-image';
+  image.alt = [receipt.querySelector('h2').textContent, ...fields.map(field =>
+    field.label + ' ' + field.lines.join(' '))].join('، ');
+  image.src = canvas.toDataURL('image/png');
+  return image;
+}
+
 function openExpenseReceipt(button) {
   const entry = JSON.parse(button.dataset.expenseReceipt);
   const dialog = document.createElement('dialog');
@@ -146,7 +226,11 @@ function openExpenseReceipt(button) {
       #expenseReceiptDialog header { color: inherit; background: none; padding: 0; }
       #expenseReceiptDialog dt { font-weight: bold; margin-top: 10px; }
       #expenseReceiptDialog dd { margin: 4px 0; overflow-wrap: anywhere; }
-      #expenseReceiptDialog form { display: flex; flex-wrap: wrap; gap: 8px; }
+      #expenseReceiptDialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+      #expenseReceiptDialog .expense-receipt-image {
+        display: block; width: 100%; height: auto; border: 1px solid #cbd9d6;
+      }
+      #expenseReceiptDialog .expense-receipt-image[hidden] { display: none; }
       @media print {
         body > :not(#expenseReceiptDialog) { display: none !important; }
         #expenseReceiptDialog {
@@ -161,6 +245,7 @@ function openExpenseReceipt(button) {
       <button type="submit" autofocus>إغلاق والرجوع</button>
       <button type="button" id="printExpenseReceipt">طباعة الوصل</button>
     </form>
+    <article id="expenseReceiptContent">
     <header>مطعم وكافيه أوتار</header>
     <h2 id="expenseReceiptTitle">وصل صرف نقدي</h2>
     <dl>
@@ -170,7 +255,26 @@ function openExpenseReceipt(button) {
       <dt>التفاصيل</dt><dd>${esc(entry.note)}</dd>
       <dt>المبلغ</dt><dd>${esc(fmt(entry.amount))}</dd>
       <dt>سجّله</dt><dd>${esc(entry.actorName || '—')}</dd>
-    </dl>`;
+    </dl>
+    </article>`;
+  const receipt = dialog.querySelector('#expenseReceiptContent');
+  try {
+    const image = expenseReceiptImage(receipt);
+    if (image) {
+      image.hidden = true;
+      receipt.after(image);
+      const showImage = () => {
+        dialog.setAttribute('aria-label', receipt.querySelector('h2').textContent);
+        dialog.removeAttribute('aria-labelledby');
+        receipt.hidden = true;
+        image.hidden = false;
+      };
+      if (image.complete && image.naturalWidth) showImage();
+      else image.addEventListener('load', showImage, { once: true });
+    }
+  } catch {
+    // Keep the printable text receipt if the browser cannot generate the image.
+  }
   dialog.querySelector('#printExpenseReceipt').onclick = () => window.print();
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
   document.body.append(dialog);
