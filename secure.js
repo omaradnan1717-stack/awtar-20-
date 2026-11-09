@@ -58,7 +58,7 @@ async function sharedDaily() {
         <p id="fundSync">تم التحديث</p>
       </section>
       <section class="panel">
-        <h2>تسجيل صرف</h2>
+        <h2>تسجيل وصل صرف</h2>
         <form id="cloudSpend">
           <div><label>المادة / وجه الصرف</label>
             <input name="item" required maxlength="100"></div>
@@ -70,7 +70,8 @@ async function sharedDaily() {
         </form>
       </section>
       <section class="panel">
-        <h2>سجل الصرفيات</h2>
+        <h2>وصولات صرف اليوم</h2>
+        <p id="fundDay">${datefmt(awtarToday())}</p>
         <div id="fundRows">${sharedRows(data)}</div>
       </section>
       ${profile.role === 'admin' ? `
@@ -103,11 +104,12 @@ function sharedTotals(d) {
     stat('الصافي المتبقي', d.remaining);
 }
 
-function sharedRows(d) {
+function sharedRows(d, showReceipts = false) {
   return `<div class="scroll"><table>
     <thead><tr>
       <th>التاريخ</th><th>المادة</th><th>التفاصيل</th>
       <th>المبلغ</th><th>الموظف</th>
+      ${showReceipts ? '<th>وصل الصرف</th>' : ''}
     </tr></thead><tbody>
     ${d.entries.slice().reverse().map(e => `
       <tr>
@@ -116,9 +118,48 @@ function sharedRows(d) {
         <td>${esc(e.note)}</td>
         <td>${fmt(e.amount)}</td>
         <td>${esc(e.actorName)}</td>
+        ${showReceipts ? `<td><button type="button"
+          data-expense-receipt="${esc(JSON.stringify(e))}"
+          onclick="openExpenseReceipt(this)">عرض الوصل</button></td>` : ''}
       </tr>`).join('') ||
-      '<tr><td colspan="5">لا توجد صرفيات</td></tr>'}
+      `<tr><td colspan="${showReceipts ? 6 : 5}">لا توجد صرفيات</td></tr>`}
     </tbody></table></div>`;
+}
+
+function openExpenseReceipt(button) {
+  const entry = JSON.parse(button.dataset.expenseReceipt);
+  const receipt = window.open('', '_blank');
+  if (!receipt) return alert('اسمح بفتح النوافذ لعرض وصل الصرف');
+  receipt.opener = null;
+  receipt.document.open();
+  receipt.document.write(`<!doctype html>
+    <html lang="ar" dir="rtl"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>وصل صرف نقدي | أوتار</title>
+    <style>
+      body {font: 16px system-ui, sans-serif; margin: 24px; color: #111}
+      main {max-width: 480px; margin: auto; border: 1px solid #aaa; padding: 20px}
+      h1, h2 {text-align: center}
+      h1 {font-size: 1.2rem}
+      dt {font-weight: bold; margin-top: 12px}
+      dd {margin: 4px 0; overflow-wrap: anywhere}
+      button {font: inherit; padding: 8px 16px; margin-top: 12px}
+      @media print {button {display: none}}
+    </style></head><body><main>
+      <h1>مطعم وكافيه أوتار</h1>
+      <h2>وصل صرف نقدي</h2>
+      <dl>
+        <dt>رقم الوصل</dt><dd dir="ltr">${esc(entry.id)}</dd>
+        <dt>التاريخ</dt><dd>${esc(datefmt(entry.date))}</dd>
+        <dt>المادة / وجه الصرف</dt><dd>${esc(entry.category)}</dd>
+        <dt>التفاصيل</dt><dd>${esc(entry.note)}</dd>
+        <dt>المبلغ</dt><dd>${esc(fmt(entry.amount))}</dd>
+        <dt>سجّله</dt><dd>${esc(entry.actorName || '—')}</dd>
+      </dl>
+      <button type="button" id="printReceipt">طباعة الوصل</button>
+    </main></body></html>`);
+  receipt.document.close();
+  receipt.document.getElementById('printReceipt').onclick = () => receipt.print();
 }
 
 async function refreshFund() {
@@ -131,6 +172,12 @@ async function refreshFund() {
     if (!document.getElementById('fundTotals')) return;
     document.getElementById('fundTotals').innerHTML = sharedTotals(d);
     document.getElementById('fundRows').innerHTML = sharedRows(d);
+    const day = awtarToday();
+    document.getElementById('fundDay').textContent = datefmt(day);
+    const spend = document.getElementById('cloudSpend');
+    if (!spend?.dataset.pending && !spend?.dataset.sending)
+      syncDailyDate(spend?.elements.expense_date, day);
+    syncDailyDate(document.getElementById('dailyReportDate'), day);
     document.getElementById('fundSync').textContent =
       'آخر تحديث: ' + new Date().toLocaleTimeString('ar-IQ');
   } catch (_) {
@@ -180,6 +227,12 @@ function awtarToday() {
   return value('year') + '-' + value('month') + '-' + value('day');
 }
 
+function syncDailyDate(input, day) {
+  if (!input) return;
+  if (!input.value || input.value === input.max) input.value = day;
+  input.max = day;
+}
+
 const dailyBeforeDate = sharedDaily;
 sharedDaily = async function () {
   await dailyBeforeDate();
@@ -191,26 +244,26 @@ sharedDaily = async function () {
     box.innerHTML = `
       <label>تاريخ المصروف</label>
       <input type="date" name="expense_date" required>`;
-    box.querySelector('input').value = awtarToday();
+    syncDailyDate(box.querySelector('input'), awtarToday());
     form.prepend(box);
   }
 
   const panel = document.createElement('section');
   panel.className = 'panel';
   panel.innerHTML = `
-    <h2>كشف صرفيات يوم</h2>
-    <label>تاريخ الكشف</label>
+    <h2>البحث عن صرفيات حسب اليوم</h2>
+    <label for="dailyReportDate">اختر تاريخ اليوم المطلوب</label>
     <input id="dailyReportDate" type="date">
-    <button onclick="loadDailyReport()">عرض الكشف</button>
+    <button type="button">بحث</button>
     <div id="dailyReportBody"></div>`;
   app.append(panel);
-  document.getElementById('dailyReportDate').value = awtarToday();
+  syncDailyDate(document.getElementById('dailyReportDate'), awtarToday());
   await loadDailyReport();
 };
 
 const rowsBeforeDelete = sharedRows;
 sharedRows = function (d) {
-  const html = rowsBeforeDelete(d);
+  const html = rowsBeforeDelete(d, true);
   if (profile?.role !== 'admin') return html;
 
   const box = document.createElement('div');
@@ -221,7 +274,10 @@ sharedRows = function (d) {
 
   const entries = d.entries.slice().reverse();
   box.querySelectorAll('tbody tr').forEach((row, i) => {
-    if (!entries[i]) return;
+    if (!entries[i]) {
+      row.cells[0].colSpan = box.querySelector('thead tr').cells.length;
+      return;
+    }
     const cell = document.createElement('td');
     const button = document.createElement('button');
     button.type = 'button';
@@ -326,7 +382,7 @@ async function loadDailyReport() {
       return;
 
     currentDailyReport = makeDailyReport(d, date);
-    body.innerHTML = reportDailyHTML(currentDailyReport) + `
+    body.innerHTML = reportDailyHTML(currentDailyReport, true) + `
       <p>
         <button onclick="printDailyReport()">طباعة الكشف</button>
         <button onclick="whatsappDailyReport()">إرسال عبر الواتساب</button>
@@ -338,13 +394,13 @@ async function loadDailyReport() {
   }
 }
 
-function reportDailyHTML(r) {
+function reportDailyHTML(r, showReceipts = false) {
   return `
     <h2>مطعم وكافيه أوتار</h2>
     <h3>كشف الصرفيات اليومية — ${esc(r.date)}</h3>
     <p>الرصيد قبل اليوم: ${fmt(r.opening)}</p>
     <p>تعزيز الرصيد خلال اليوم: ${fmt(r.topups)}</p>
-    ${rowsBeforeDelete({ entries: r.rows })}
+    ${rowsBeforeDelete({ entries: r.rows }, showReceipts)}
     <p><strong>مجموع صرف اليوم: ${fmt(r.spent)}</strong></p>
     <p><strong>الرصيد بنهاية اليوم: ${fmt(r.closing)}</strong></p>
     <small>حسب العمليات الموجودة وقت إعداد الكشف</small>`;
@@ -568,7 +624,14 @@ loadDailyReport = async function (show = false) {
   const input = document.getElementById('dailyReportDate');
   const body = document.getElementById('dailyReportBody');
   if (!input || !body) return;
-  if (!input.value) return alert('اختر تاريخ الكشف');
+  if (!input.value) {
+    if (show) alert('اختر تاريخ الكشف');
+    return;
+  }
+  if (input.value > awtarToday()) {
+    if (show) alert('اختر تاريخ اليوم أو يوماً سابقاً');
+    return;
+  }
 
   const date = input.value;
   const request = ++dailyReportRequest;
@@ -584,7 +647,7 @@ loadDailyReport = async function (show = false) {
         !body.isConnected || input.value !== date) return;
 
     currentDailyReport = makeDailyReport(data, date);
-    body.innerHTML = reportDailyHTML(currentDailyReport) + `
+    body.innerHTML = reportDailyHTML(currentDailyReport, true) + `
       <p>
         <button type="button" onclick="printDailyReport()">
           طباعة الكشف
@@ -974,15 +1037,16 @@ sharedTotals = function (d) {
 
 const legacyDailyRows = sharedRows;
 sharedRows = function (d) {
-  return legacyDailyRows(d.dailyVersion === 2 ? {
+  const day = awtarToday();
+  return legacyDailyRows({
     ...d,
-    entries: d.entries.filter(e => e.date === d.date)
-  } : d);
+    entries: d.entries.filter(e => e.date === day)
+  });
 };
 
 const legacyDailyHTML = reportDailyHTML;
-reportDailyHTML = function (r) {
-  const html = legacyDailyHTML(r);
+reportDailyHTML = function (r, showReceipts) {
+  const html = legacyDailyHTML(r, showReceipts);
   if (!r.daily) return html;
 
   return html.replace(
@@ -1134,8 +1198,8 @@ showReport = awtarWithoutReturns(showReport);
 exportCSV = awtarWithoutReturns(exportCSV);
 printLedger = awtarWithoutReturns(printLedger);
 const awtarDailyHTMLBeforeAccounting = reportDailyHTML;
-reportDailyHTML = function(r) {
-  return awtarDailyHTMLBeforeAccounting(r)
+reportDailyHTML = function(r, showReceipts) {
+  return awtarDailyHTMLBeforeAccounting(r, showReceipts)
     .replace('تم ترحيل المتبقي إلى الإيرادات:', 'المتبقي المعاد إلى الصندوق (تحويل داخلي):')
     .replace('يُرحّل المتبقي إلى الإيرادات بعد انتهاء اليوم.', 'يعود المتبقي إلى الصندوق بعد انتهاء اليوم، ولا يزيد الإيرادات.');
 };
