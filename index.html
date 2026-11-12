@@ -190,6 +190,24 @@ function mountMasterReceipts(form){
 #awtarWelcome h2{color:#17685c;margin:12px 0;font-size:23px}
 #awtarWelcome p{line-height:1.9;margin:12px 0 24px}
 #awtarWelcome button{width:100%;min-height:48px}
+#awtarWelcome{overflow:hidden;animation:awtarFade .45s ease both;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+#awtarWelcome .welcome-card{position:relative;overflow:hidden;animation:awtarEnter .7s cubic-bezier(.2,.8,.2,1) both}
+#awtarWelcome .welcome-card:before{content:"";position:absolute;inset:-100%;background:linear-gradient(115deg,transparent 43%,#d5b97526 49%,transparent 55%);pointer-events:none;animation:awtarShine 2.8s ease 1s 2}
+#awtarWelcome .welcome-logo{display:block;width:84px;height:84px;object-fit:cover;border-radius:22px;margin:0 auto 18px;box-shadow:0 8px 24px #17685c26;animation:awtarLogo .8s ease .2s both}
+#awtarWelcome h2{animation:awtarRise .65s ease .35s both}
+#awtarWelcome p{animation:awtarRise .65s ease .5s both}
+#awtarWelcome button{position:relative;animation:awtarRise .65s ease .65s both;transition:transform .18s,background .18s;touch-action:manipulation}
+#awtarWelcome button:active{transform:scale(.97)}
+#awtarWelcome.awtar-closing{animation:awtarFadeOut .25s ease both;pointer-events:none}
+#awtarWelcome.awtar-closing .welcome-card{animation:awtarLeave .25s ease both}
+@keyframes awtarFade{from{opacity:0}to{opacity:1}}
+@keyframes awtarEnter{from{opacity:0;transform:translateY(30px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes awtarLogo{from{opacity:0;transform:scale(.7) rotate(-10deg)}to{opacity:1;transform:scale(1) rotate(0)}}
+@keyframes awtarRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes awtarShine{from{transform:translateX(-35%)}to{transform:translateX(35%)}}
+@keyframes awtarFadeOut{to{opacity:0}}
+@keyframes awtarLeave{from{opacity:1;transform:scale(1)}to{opacity:0;transform:translateY(-12px) scale(.97)}}
+@media(prefers-reduced-motion:reduce){#awtarWelcome,#awtarWelcome *{animation:none!important;transition:none!important}}
 @media print{#awtarWelcome{display:none!important}}
 </style>
 <script>
@@ -198,8 +216,8 @@ function mountMasterReceipts(form){
   if(document.getElementById('awtarWelcome'))return;
   var previous=document.activeElement;
   var overlay=document.createElement('div');overlay.id='awtarWelcome';overlay.dir='rtl';
-  overlay.innerHTML='<section class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="awtarWelcomeTitle" aria-describedby="awtarWelcomeText"><span aria-hidden="true" style="font-size:42px">🌿</span><h2 id="awtarWelcomeTitle">أهلاً وسهلاً بكم في أوتار</h2><p id="awtarWelcomeText">مطعم وكافيه أوتار<br>نورتونا في نظام الإيرادات والمصروفات<br>نتمنى لكم يوم عمل موفقاً وحافلاً بالنجاح</p><button type="button">بدء العمل</button></section>';
-  function close(){overlay.remove();document.removeEventListener('keydown',keys);if(previous&&previous.isConnected)previous.focus();}
+  overlay.innerHTML='<section class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="awtarWelcomeTitle" aria-describedby="awtarWelcomeText"><img class="welcome-logo" src="./0DEC2553-8C77-4E51-89F2-A824319E9690.png" alt="شعار أوتار"><h2 id="awtarWelcomeTitle">أهلاً وسهلاً بكم في أوتار</h2><p id="awtarWelcomeText">مطعم وكافيه أوتار<br>نورتونا في نظام الإيرادات والمصروفات<br>نتمنى لكم يوم عمل موفقاً وحافلاً بالنجاح</p><button type="button">بدء العمل</button></section>';
+  function close(){if(overlay.classList.contains('awtar-closing'))return;overlay.classList.add('awtar-closing');document.removeEventListener('keydown',keys);setTimeout(function(){overlay.remove();if(previous&&previous.isConnected)previous.focus();},250);}
   function keys(e){if(e.key==='Escape'){e.preventDefault();close();}else if(e.key==='Tab'){e.preventDefault();overlay.querySelector('button').focus();}}
   overlay.querySelector('button').onclick=close;
   document.body.appendChild(overlay);document.addEventListener('keydown',keys);overlay.querySelector('button').focus();
