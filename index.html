@@ -183,5 +183,30 @@ function mountMasterReceipts(form){
     });
   });
 })();
-</script></body></html>
+</script>
+<style>
+#awtarWelcome{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:24px;background:rgba(10,35,33,.65)}
+#awtarWelcome .welcome-card{width:100%;max-width:390px;text-align:center;background:#fff;color:#203134;border-radius:24px;padding:32px 24px;box-shadow:0 20px 70px #0004}
+#awtarWelcome h2{color:#17685c;margin:12px 0;font-size:23px}
+#awtarWelcome p{line-height:1.9;margin:12px 0 24px}
+#awtarWelcome button{width:100%;min-height:48px}
+@media print{#awtarWelcome{display:none!important}}
+</style>
+<script>
+(function(){
+ function showWelcome(){
+  if(document.getElementById('awtarWelcome'))return;
+  var previous=document.activeElement;
+  var overlay=document.createElement('div');overlay.id='awtarWelcome';overlay.dir='rtl';
+  overlay.innerHTML='<section class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="awtarWelcomeTitle" aria-describedby="awtarWelcomeText"><span aria-hidden="true" style="font-size:42px">🌿</span><h2 id="awtarWelcomeTitle">أهلاً وسهلاً بكم في أوتار</h2><p id="awtarWelcomeText">مطعم وكافيه أوتار<br>نورتونا في نظام الإيرادات والمصروفات<br>نتمنى لكم يوم عمل موفقاً وحافلاً بالنجاح</p><button type="button">بدء العمل</button></section>';
+  function close(){overlay.remove();document.removeEventListener('keydown',keys);if(previous&&previous.isConnected)previous.focus();}
+  function keys(e){if(e.key==='Escape'){e.preventDefault();close();}else if(e.key==='Tab'){e.preventDefault();overlay.querySelector('button').focus();}}
+  overlay.querySelector('button').onclick=close;
+  document.body.appendChild(overlay);document.addEventListener('keydown',keys);overlay.querySelector('button').focus();
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',showWelcome,{once:true});else showWelcome();
+})();
+</script>
+</body></html>
+
 
