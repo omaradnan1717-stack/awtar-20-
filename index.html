@@ -70,28 +70,38 @@ function cashierPage() {
   if (profile?.role !== 'admin') return;
   clearInterval(dailyPoll);
   const rows = cashierGroups().sort((a,b)=>b.date.localeCompare(a.date));
-  app.innerHTML = `<section class="panel"><h2>مطابقة الكاشير</h2><p>الكلي − الماستر − دخول الكاشير = الصافي النقدي. الحفظ يرحّل الإيرادين معاً.</p><form id="cashierForm"><div><label>اسم الكاشير</label><input name="cashier" maxlength="100" required list="cashierNames"><datalist id="cashierNames">${[...new Set(rows.map(r=>r.cashier))].map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div><div><label>التاريخ</label><input name="date" type="date" value="${today()}" required></div><div><label>الشفت / رقم الوجبة</label><input name="shift" value="1" maxlength="50" required></div><div><label>المبيعات الكلية (د.ع)</label><input name="total" type="number" min="1" step="1" required></div><div><label>الماستر (د.ع)</label><input name="master" type="number" min="0" step="1" value="0" required></div><div><label>دخول الكاشير (د.ع)</label><input name="opening" type="number" min="0" step="1" value="0" required></div><div><label>الصافي النقدي</label><output id="cashierNet" style="display:block;padding:11px;font-weight:bold">—</output></div><button type="submit">حفظ وترحيل المطابقة</button></form><p id="cashierStatus" role="status"></p></section><section class="panel"><h2>المطابقات المستقلة</h2><div class="scroll"><table><thead><tr><th>التاريخ</th><th>الكاشير</th><th>الشفت</th><th>الكلي</th><th>دخول الكاشير</th><th>صافي النقدي</th><th>ماستر</th><th>إجراء</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${datefmt(r.date)}</td><td>${esc(r.cashier)}</td><td>${esc(r.shift)}</td><td>${fmt(r.total)}</td><td>${fmt(r.opening||0)}</td><td>${fmt(r.total-r.master-(r.opening||0))}</td><td>${fmt(r.master)}</td><td><button class="danger" onclick="deleteCashierMatch('${esc(r.id)}')">إلغاء المطابقة</button></td></tr>`).join('')||'<tr><td colspan="8">لا توجد مطابقات</td></tr>'}</tbody></table></div><p class="notice">كل كاشير مستقل. عند وجود أكثر من وجبة لنفس الكاشير في اليوم، استخدم رقم شفت مختلفاً. لا تسجّل هذه المبيعات مرة ثانية يدوياً بالإيرادات. الإلغاء يحذف إيرادي المطابقة معاً.</p></section>`;
+  app.innerHTML = `<section class="panel"><h2>مطابقة الكاشير</h2><p>اختر كاشير المبيعات للمطابقة المعتادة، أو كاشير عمال فقط لتسجيل المبيعات الآجلة دون حركة نقدية. أضف فواتير كل عامل في برنامج الرواتب يدوياً، ولا تسجلها مصروفاً هنا.</p><form id="cashierForm"><div><label>نوع الكاشير</label><select name="matchKind"><option value="sales">كاشير المبيعات</option><option value="workers">كاشير عمال فقط — مبيعات آجلة</option></select></div><div><label>اسم الكاشير</label><input name="cashier" maxlength="100" required list="cashierNames"><datalist id="cashierNames">${[...new Set(rows.map(r=>r.cashier))].map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div><div><label>التاريخ</label><input name="date" type="date" value="${today()}" required></div><div><label>الشفت / رقم الوجبة</label><input name="shift" value="1" maxlength="50" required></div><div><label>المبيعات الكلية (د.ع)</label><input name="total" type="number" min="1" step="1" required></div><div><label>الماستر (د.ع)</label><input name="master" type="number" min="0" step="1" value="0" required></div><div><label>دخول الكاشير (د.ع)</label><input name="opening" type="number" min="0" step="1" value="0" required></div><div><label>الصافي النقدي</label><output id="cashierNet" style="display:block;padding:11px;font-weight:bold">—</output></div><button type="submit">حفظ وترحيل المطابقة</button></form><p id="cashierStatus" role="status"></p></section><section class="panel"><h2>المطابقات المستقلة</h2><div class="scroll"><table><thead><tr><th>التاريخ</th><th>الكاشير</th><th>الشفت</th><th>الكلي</th><th>دخول الكاشير</th><th>فواتير العمال</th><th>صافي النقدي</th><th>ماستر</th><th>إجراء</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${datefmt(r.date)}</td><td>${esc(r.cashier)}</td><td>${esc(r.shift)}${r.kind==='workers'?'<br>كاشير عمال':''}</td><td>${fmt(r.total)}</td><td>${fmt(r.opening||0)}</td><td>${fmt(r.workerInvoices||0)}</td><td>${fmt(r.total-r.master-(r.opening||0)-(r.workerInvoices||0))}</td><td>${fmt(r.master)}</td><td><button class="danger" onclick="deleteCashierMatch('${esc(r.id)}')">إلغاء المطابقة</button></td></tr>`).join('')||'<tr><td colspan="9">لا توجد مطابقات</td></tr>'}</tbody></table></div><p class="notice">كل كاشير مستقل. عند وجود أكثر من وجبة لنفس الكاشير في اليوم، استخدم رقم شفت مختلفاً. لا تسجّل هذه المبيعات مرة ثانية يدوياً بالإيرادات. الإلغاء يحذف قيود المطابقة المرتبطة بها معاً. كاشير العمال مستقل، وتدخل فواتيره بإجمالي المبيعات فقط دون النقدي أو الماستر.</p></section>`;
   const form=document.getElementById('cashierForm');
-  const updateNet = ()=>{const t=Number(form.elements.total.value),m=Number(form.elements.master.value),o=Number(form.elements.opening.value);document.getElementById('cashierNet').textContent=Number.isSafeInteger(t)&&Number.isSafeInteger(m)&&Number.isSafeInteger(o)&&o>=0&&m>=0&&t-m>=o?fmt(t-m-o):'تحقق من المبالغ';};
+  const masterBox=mountMasterReceipts(form);
+  const workerBox=mountMasterReceipts(form,'total','فواتير العمال');
+  const updateNet = ()=>{
+    const workers=form.elements.matchKind.value==='workers';
+    const t=Number(form.elements.total.value),m=workers?0:Number(form.elements.master.value),o=workers?0:Number(form.elements.opening.value);
+    document.getElementById('cashierNet').textContent=Number.isSafeInteger(t)&&Number.isSafeInteger(m)&&Number.isSafeInteger(o)&&t>0&&o>=0&&m>=0&&t-m>=o?fmt(workers?0:t-m-o):'تحقق من المبالغ';
+    [form.elements.master,form.elements.opening].forEach(el=>{el.disabled=workers;el.parentElement.hidden=workers;});
+    masterBox.hidden=workers;masterBox.querySelectorAll('input,button').forEach(el=>el.disabled=workers);
+    workerBox.hidden=!workers;workerBox.querySelectorAll('input,button').forEach(el=>el.disabled=!workers);
+  };
   form.oninput = updateNet;
-  mountMasterReceipts(form);
+  form.elements.matchKind.addEventListener('change',updateNet);
+  updateNet();
   form.onsubmit=async ev=>{
     ev.preventDefault();
-    const f=new FormData(form),cashier=String(f.get('cashier')).trim().replace(/\s+/g,' '),shift=String(f.get('shift')).trim(),date=f.get('date'),total=Number(f.get('total')),master=Number(f.get('master')),opening=Number(f.get('opening'));
+    const f=new FormData(form),kind=f.get('matchKind'),workers=kind==='workers',cashier=String(f.get('cashier')).trim().replace(/\s+/g,' '),shift=String(f.get('shift')).trim(),date=f.get('date'),total=Number(f.get('total')),master=workers?0:Number(f.get('master')),opening=workers?0:Number(f.get('opening'));
     if(!cashier||!shift||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isSafeInteger(total)||total<=0||!Number.isSafeInteger(master)||master<0||master>total||!Number.isSafeInteger(opening)||opening<0||opening>total-master)return alert('تحقق من الاسم والتاريخ والمبالغ؛ مجموع الماستر ودخول الكاشير لا يتجاوز الكلي');
     if(total-opening===0)return alert('الصافي والماستر صفر؛ لا يوجد إيراد لترحيله');
     const status=document.getElementById('cashierStatus');
     busy(true);
     try {
       await refreshAdmin();
-      if(cashierGroups().some(r=>r.date===date&&r.cashier===cashier&&r.shift===shift))throw Error('هذه المطابقة مرحّلة سابقاً لنفس الكاشير والتاريخ والشفت');
-      const match={id:id(),cashier,shift,date,total,master,opening}, next=structuredClone(db),created=Date.now();
-      const newRows=[{amount:total-master-opening,method:'نقدي'},{amount:master,method:'ماستر كارد'}].filter(e=>e.amount>0).map(e=>({...e,id:id(),type:'income',created,date,category:'مبيعات الكاشير',note:'مطابقة '+cashier+' — شفت '+shift+' — دخول الكاشير '+opening,cashierMatchId:match.id}));
+      if(cashierGroups().some(r=>r.date===date&&r.cashier===cashier&&r.shift===shift&&(r.kind||'sales')===kind))throw Error('هذه المطابقة مرحّلة سابقاً لنفس الكاشير والتاريخ والشفت');
+      const match={id:id(),cashier,shift,date,total,master,opening,kind,workerInvoices:workers?total:0}, next=structuredClone(db),created=Date.now();
+      const newRows=(workers?[{amount:total,method:'ذمم عمال'}]:[{amount:total-master-opening,method:'نقدي'},{amount:master,method:'ماستر كارد'}]).filter(e=>e.amount>0).map(e=>({...e,id:id(),type:'income',created,date,category:workers?'مبيعات آجلة للعمال':'مبيعات الكاشير',note:'مطابقة '+cashier+' — شفت '+shift+' — دخول الكاشير '+opening,cashierMatchId:match.id}));
       newRows[0].cashierMatch=match;
       next.entries.push(...newRows);
       const newRevision=await api('/rest/v1/rpc/awtar_save',{body:next,expected:revision});
       db=next;committed=structuredClone(next);revision=newRevision;
-      cashierPage();document.getElementById('cashierStatus').textContent='تم حفظ المطابقة وترحيل النقدي والماستر ✅';
+      cashierPage();document.getElementById('cashierStatus').textContent=workers?'تم حفظ كاشير العمال كمبيعات آجلة؛ النقدي والماستر صفر ✅':'تم حفظ المطابقة وترحيل النقدي والماستر ✅';
     } catch(error) {
       // Refresh after ambiguous responses: a committed match will block a retry.
       try{await refreshAdmin();}catch(_){}
@@ -100,7 +110,7 @@ function cashierPage() {
   };
 }
 async function deleteCashierMatch(matchId) {
-  if(profile?.role!=='admin'||!confirm('إلغاء المطابقة وحذف الإيراد النقدي وإيراد الماستر المرتبطين بها؟'))return;
+  if(profile?.role!=='admin'||!confirm('إلغاء المطابقة وحذف قيود المبيعات المرتبطة بها؟'))return;
   busy(true);
   try {
     await refreshAdmin();
@@ -123,10 +133,10 @@ function parseMasterReceipt(value){
  if(!Number.isSafeInteger(amount)||amount<=0)throw Error('مبلغ الوصل يجب أن يكون أكبر من صفر');
  return amount;
 }
-function mountMasterReceipts(form){
- const master=form.elements.master;
+function mountMasterReceipts(form,field="master",title="وصولات الماستر"){
+ const master=form.elements[field];
  const box=document.createElement('div');box.style.gridColumn='1 / -1';
- box.innerHTML=`<details><summary>جمع وصولات الماستر</summary><p>أضف مبلغ كل وصل؛ المجموع ينتقل تلقائياً إلى خانة الماستر. الحفظ يتم بزر حفظ وترحيل المطابقة.</p><label>مبلغ الوصل<input data-receipt-amount type="text" inputmode="numeric" autocomplete="off" placeholder="مثال: 15,000" dir="ltr"></label><button type="button" data-add-receipt>إضافة الوصل</button><ol data-receipt-list></ol><p data-receipt-total></p><button type="button" class="light" data-clear-receipts>مسح قائمة الوصولات</button><p data-receipt-status role="status"></p></details>`;
+ box.innerHTML=`<details><summary>جمع ${title}</summary><p>أضف مبلغ كل وصل؛ المجموع ينتقل تلقائياً إلى خانة ${field === "master" ? "الماستر" : "المبيعات الكلية"}. الحفظ يتم بزر حفظ وترحيل المطابقة.</p><label>مبلغ الوصل<input data-receipt-amount type="text" inputmode="numeric" autocomplete="off" placeholder="مثال: 15,000" dir="ltr"></label><button type="button" data-add-receipt>إضافة الوصل</button><ol data-receipt-list></ol><p data-receipt-total></p><button type="button" class="light" data-clear-receipts>مسح قائمة الوصولات</button><p data-receipt-status role="status"></p></details>`;
  master.parentElement.insertAdjacentElement('afterend',box);
  const input=box.querySelector('[data-receipt-amount]'),list=box.querySelector('[data-receipt-list]'),summary=box.querySelector('[data-receipt-total]'),status=box.querySelector('[data-receipt-status]');
  let amounts=[];
@@ -146,7 +156,7 @@ function mountMasterReceipts(form){
   try{
    const amount=parseMasterReceipt(input.value),total=amounts.reduce((a,b)=>a+b,0)+amount;
    if(!Number.isSafeInteger(total))throw Error('مجموع الوصولات أكبر من الحد المسموح');
-   if(!amounts.length && Number(master.value)>0 && !confirm('استبدال مبلغ الماستر الحالي بمجموع قائمة الوصولات؟'))return;
+   if(!amounts.length && Number(master.value)>0 && !confirm('استبدال المبلغ الحالي بمجموع القائمة؟'))return;
    amounts.push(amount);input.value='';status.textContent='';draw(true);input.focus();
   }catch(e){status.textContent=e.message;}
  }
@@ -158,14 +168,69 @@ function mountMasterReceipts(form){
  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!input.value)input.setCustomValidity('');});
  box.querySelector('[data-clear-receipts]').onclick=()=>{
   if(!amounts.length)return;
-  if(!confirm('مسح قائمة الوصولات وتصفير خانة الماستر؟'))return;
+  if(!confirm('مسح القائمة وتصفير المبلغ؟'))return;
   amounts=[];status.textContent='';draw(true);
  };
  form.addEventListener('reset',()=>{amounts=[];input.setCustomValidity('');status.textContent='';setTimeout(()=>draw(false),0);});
  draw(false);
+ return box;
 }
 
-</script><script src="revenue-split.js?v=20261102-2"></script><script src="daily-receipts.js?v=receipt-photo-20261109"></script><script src="notifications.js?v=20261109-1"></script><script src="monthly.js?v=20261111-2"></script><script>
+</script><script>
+'use strict';
+// Presentation only: preserve existing entries, cloud saving and cash accounting.
+function revenueRows(rows) {
+  return rows.filter(e => e.type === 'income' &&
+    !(typeof awtarAutomaticReturn === 'function' && awtarAutomaticReturn(e)));
+}
+function revenueSummary(rows) {
+  const all = revenueRows(rows), cash = all.filter(e=>e.method==='نقدي'),
+    master = all.filter(e=>e.method==='ماستر كارد'), workers=all.filter(e=>e.method==='ذمم عمال'),
+    other = all.filter(e=>!['نقدي','ماستر كارد','ذمم عمال'].includes(e.method));
+  const expenses = rows.filter(e=>e.type==='expense');
+  const cashSpent=sum(expenses.filter(e=>e.method==='نقدي'));
+  const masterSpent=sum(expenses.filter(e=>e.method==='ماستر كارد'));
+  return '<div class="cards">'+stat('إيراد نقدي',sum(cash))+stat('إيراد ماستر',sum(master))+
+    stat('فواتير العمال — مبيعات آجلة',sum(workers))+(other.length?stat('إيرادات بطرق أخرى',sum(other)):'')+stat('إجمالي المبيعات والإيرادات — يشمل الآجل',sum(all))+
+    stat('إجمالي المصروفات',sum(expenses))+stat('المتبقي بعد المصروفات',sum(all)-sum(expenses))+
+    stat('المصروف النقدي',cashSpent)+stat('المتبقي من الإيراد النقدي',sum(cash)-cashSpent)+
+    stat('مصروفات الماستر',masterSpent)+stat('المتبقي من إيراد الماستر',sum(master)-masterSpent)+'</div>';
+
+}
+const ledgerBeforeRevenueSplit = ledger;
+ledger = function(type) {
+  if(type!=='income') return ledgerBeforeRevenueSplit(type);
+  const all = revenueRows(db.entries).slice().sort((a,b)=>b.date.localeCompare(a.date)||b.created-a.created);
+  const groups=[['إيراد نقدي','نقدي'],['إيراد ماستر','ماستر كارد']];
+  const workers=all.filter(e=>e.method==='ذمم عمال');
+  const other=all.filter(e=>!['نقدي','ماستر كارد','ذمم عمال'].includes(e.method));
+  return '<section class="panel"><button onclick="cashierPage()">مطابقة الكاشير</button></section>'+ 
+    '<section class="panel"><h2>ملخص الإيرادات المسجلة</h2>'+revenueSummary(db.entries)+'</section>'+ 
+    groups.map(([title,method])=>`<section class="panel"><h2>إضافة ${title}</h2><form onsubmit="addEntry(event,'income')">${dateField.replace(/value="[^"]*"/,`value="${today()}"`)}${moneyField}<input type="hidden" name="method" value="${method}"><div><label>التصنيف</label><select name="category">${['مبيعات المطعم','مبيعات الكافيه','توصيل','إيراد آخر'].map(c=>`<option>${c}</option>`).join('')}</select></div>${noteField}<button>حفظ ${title}</button></form></section><section class="panel"><div class="topline"><h2>سجل ${title}</h2><b>${fmt(sum(all.filter(e=>e.method===method)))}</b></div>${entryTable(all.filter(e=>e.method===method),true)}</section>`).join('')+
+    (workers.length?'<section class="panel"><h2>فواتير العمال — مبيعات آجلة</h2>'+entryTable(workers,true)+'</section>':'')+
+    (other.length?'<section class="panel"><h2>إيرادات بطرق أخرى</h2>'+entryTable(other,true)+'</section>':'')+
+    '<p class="notice">المتبقي يُحسب بعد طرح المصروفات المسجّلة لنفس الفترة وبحسب طريقة الدفع. هذا المتبقي لا يشمل الرصيد السابق أو تحويل عهدة الصرف. فواتير العمال تدخل بإجمالي المبيعات، ولا تزيد النقدي أو الماستر. إضافتها للعمال واستقطاعها من الرواتب يتم يدوياً. الماستر يدخل بإجمالي الإيرادات، ولا يدخل برصيد الصندوق النقدي. إيرادات مطابقة الكاشير تظهر تلقائياً هنا؛ لا تسجّلها مرة ثانية.</p>';
+};
+const homeBeforeRevenueSplit=home;
+home=function(){return homeBeforeRevenueSplit()+'<section class="panel" style="margin-top:14px"><h2>تفصيل إيرادات الشهر</h2>'+revenueSummary(db.entries.filter(e=>e.date.startsWith(filterMonth)))+'</section>';};
+const showReportBeforeRevenueSplit=showReport;
+showReport=function(){
+  showReportBeforeRevenueSplit();
+  const from=document.getElementById('from').value,to=document.getElementById('to').value;
+  if(from>to)return;
+  document.getElementById('reportResult').insertAdjacentHTML('beforeend','<h3>تفصيل الإيرادات للفترة</h3>'+revenueSummary(db.entries.filter(e=>e.date>=from&&e.date<=to)));
+};
+const printLedgerBeforeRevenueSplit=printLedger;
+printLedger=function(type){
+  if(type!=='income')return printLedgerBeforeRevenueSplit(type);
+  const rows=db.entries.filter(e=>!(typeof awtarAutomaticReturn==='function'&&awtarAutomaticReturn(e))).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  openStatement('كشف الإيرادات',revenueSummary(rows)+['نقدي','ماستر كارد','ذمم عمال'].map(method=>'<h3>'+ (method==='ذمم عمال'?'فواتير العمال — مبيعات آجلة':method==='نقدي'?'إيراد نقدي':'إيراد ماستر')+'</h3>'+entryTable(revenueRows(rows).filter(e=>e.method===method),false)).join('')+
+    (revenueRows(rows).some(e=>!['نقدي','ماستر كارد','ذمم عمال'].includes(e.method))?'<h3>إيرادات بطرق أخرى</h3>'+entryTable(revenueRows(rows).filter(e=>!['نقدي','ماستر كارد','ذمم عمال'].includes(e.method)),false):''));
+};
+if(profile?.role==='admin')render();
+
+
+</script><script src="daily-receipts.js?v=receipt-photo-20261109"></script><script src="notifications.js?v=20261109-1"></script><script src="monthly.js?v=20261111-2"></script><script>
 // Keep the navigation selection in sync for pages opened outside go().
 (() => {
   const navigation = document.getElementById('nav');
@@ -226,5 +291,6 @@ function mountMasterReceipts(form){
 })();
 </script>
 </body></html>
+
 
 
