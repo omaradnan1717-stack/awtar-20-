@@ -101,12 +101,13 @@
 
   openExpenseReceipt = async function (button) {
     const entry = JSON.parse(button.dataset.expenseReceipt);
+    clearDailyPrintJob();
     document.getElementById('expenseReceiptDialog')?.remove();
     const dialog = document.createElement('dialog');
     dialog.id = 'expenseReceiptDialog';
     dialog.dir = 'rtl';
     dialog.style.cssText = 'width:min(94vw,760px);max-height:90vh;overflow:auto;padding:16px;border:1px solid #aaa;border-radius:12px;background:white;color:#111';
-    dialog.innerHTML = '<form method="dialog" class="no-print" style="display:flex;gap:8px;margin-bottom:12px"><button>إغلاق والرجوع</button><button type="button" data-print>طباعة الوصل</button></form><h2>صورة الوصل الأصلي</h2><p>' + esc(datefmt(entry.date)) + ' — ' + esc(fmt(entry.amount)) + '</p><div data-photo role="status">جارٍ تحميل صورة الوصل…</div>';
+    dialog.innerHTML = '<style>@media print{body > :not(#expenseReceiptDialog){display:none!important}#expenseReceiptDialog{position:static!important;display:block!important;width:100%!important;max-width:none!important;max-height:none!important;overflow:visible!important;margin:0!important;border:0!important}#expenseReceiptDialog::backdrop{display:none}#expenseReceiptDialog img{max-width:100%!important;break-inside:avoid}} </style><form method="dialog" class="no-print" style="display:flex;gap:8px;margin-bottom:12px"><button>إغلاق والرجوع</button><button type="button" data-print>طباعة الوصل</button></form><h2>صورة الوصل الأصلي</h2><p>' + esc(datefmt(entry.date)) + ' — ' + esc(fmt(entry.amount)) + '</p><div data-photo role="status">جارٍ تحميل صورة الوصل…</div>';
     dialog.querySelector('[data-print]').onclick = () => window.print();
     dialog.addEventListener('close', () => dialog.remove(), {once:true});
     document.body.append(dialog);
@@ -148,3 +149,4 @@
     return openReceiptFile(() => button.dataset.receiptOpen);
   });
 })();
+
