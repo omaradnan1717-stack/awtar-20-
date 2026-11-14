@@ -507,11 +507,34 @@ window.accountReceipt=(pid,mid)=>{const p=db.parties.find(p=>p.id===pid),m=p?.mo
 window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;openStatement('كشف '+p.name,`<p>${esc(p.phone||'')} — ${accountMonth?esc(accountMonth):'كل الفترات'}</p><h3>${balance(p)>=0?'المتبقي عليه':'المتبقي إله'}: ${fmt(Math.abs(balance(p)))}</h3>${movementTable(p,accountRows(p),false)}`);};
 window.accountShare=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;const phone=whatsappPhone(p.phone);if(!phone)return alert('أضف رقم هاتف صحيحاً أولاً');const rows=accountRows(p),text=['مطعم وكافيه أوتار','كشف حساب: '+p.name,accountMonth?'الشهر: '+accountMonth:'كل الفترات',...rows.map(m=>`${datefmt(m.date)} | ${label[m.category]||(m.kind==='add'?'إضافة':'تسديد')} | ${fmt(m.amount)} | ${m.note||''}`),(balance(p)>=0?'المتبقي عليه: ':'المتبقي إله: ')+fmt(Math.abs(balance(p)))].join('\n');window.open('https://wa.me/'+phone.replace(/^\+/,'')+'?text='+encodeURIComponent(text),'_blank','noopener');};
 
+// Receive paid salary operations only from the explicitly opened payroll window.
+let payrollImportBusy=false,payrollImportReceived=false;
+if(new URLSearchParams(location.search).get('payroll_transfer')==='1'&&window.opener){
+ const timer=setInterval(()=>{if(payrollImportReceived||window.opener.closed){clearInterval(timer);return;}window.opener.postMessage({type:'awtar-payroll-ready-v1'},location.origin);},1200);
+}
+window.addEventListener('message',async event=>{
+ if(event.origin!==location.origin||event.source!==window.opener||event.data?.type!=='awtar-payroll-transfer-v1'||payrollImportBusy)return;
+ if(profile?.role!=='admin')return;
+ payrollImportBusy=true;
+ try{
+ const rows=event.data.rows;
+ if(!Array.isArray(rows)||!rows.length||rows.length>5000)throw Error('بيانات الرواتب غير صالحة');
+ const seen=new Set();
+ for(const r of rows){if(typeof r.id!=='string'||!r.id||r.id==='undefined'||seen.has(r.id)||!Number.isSafeInteger(r.amount)||r.amount<=0||typeof r.name!=='string'||r.name.length>200||!['workers','delivery'].includes(r.group))throw Error('بيانات الرواتب غير صالحة');seen.add(r.id);ensureDate(r.date);}
+ await refreshAdmin();
+ const next=structuredClone(db),fresh=[];
+ for(const r of rows){const key='awtar-staff:'+r.id,previous=next.entries.find(e=>e.payrollSourceId===key);
+ if(previous){if(previous.amount!==r.amount||previous.date!==r.date)throw Error('تم تعديل راتب مرحّل سابقاً. صحّح المصروف السابق قبل إعادة الترحيل');continue;}
+ fresh.push(r);next.entries.push({id:id(),created:Date.now(),date:r.date,type:'expense',amount:r.amount,method:'نقدي',category:'رواتب',note:(r.group==='delivery'?'راتب دلفري: ':'راتب عامل: ')+r.name,payrollSourceId:key});}
+ if(!fresh.length){payrollImportReceived=true;alert('هذه الرواتب مرحّلة سابقاً؛ لم يُضف مصروف مكرر');return;}
+ if(!confirm('ترحيل '+fresh.length+' عملية صرف رواتب بمجموع '+fmt(fresh.reduce((n,r)=>n+r.amount,0))+' إلى المصروفات النقدية؟\nتأكد أن هذه المبالغ لم تُسجّل يدوياً سابقاً.')){payrollImportReceived=true;return;}
+ await commitAccounts(next);payrollImportReceived=true;go('expense');alert('تم ترحيل الرواتب إلى المصروفات. إعادة الضغط لا تكررها.');
+ }catch(error){payrollImportReceived=true;alert('لم يُؤكد الترحيل: '+error.message+' . أعد الترحيل من الرواتب للتحقق بدون تكرار.');}finally{payrollImportBusy=false;}
+});
+const payrollRemoveEntry=removeEntry;
+removeEntry=function(key){if(db.entries.find(e=>e.id===key)?.payrollSourceId)return alert('مصروف مرتبط بالرواتب. لا تحذفه حتى لا ينفصل عن سجل الترحيل.');return payrollRemoveEntry(key);};
+
 })();
 
 </script>
 </body></html>
-
-
-
-
