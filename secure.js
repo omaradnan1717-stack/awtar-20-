@@ -1594,3 +1594,13 @@ sharedDaily = async function() {
   });
 })();
 
+
+
+/* Remove a completed print job before another statement can be printed. */
+function clearDailyPrintJob(){
+  document.getElementById('awtarPrintArea')?.remove();
+  document.getElementById('awtarPrintStyle')?.remove();
+}
+window.addEventListener('afterprint',clearDailyPrintJob);
+const statementBeforePrintCleanup=openStatement;
+openStatement=function(){clearDailyPrintJob();return statementBeforePrintCleanup.apply(this,arguments);};
