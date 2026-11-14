@@ -294,12 +294,11 @@ if(profile?.role==='admin')render();
 /* Shared partner/customer accounts. Stored in the existing versioned cloud state. */
 (()=>{
 'use strict';
-const debtTab=tabs.find(t=>t[0]==='debts');if(debtTab)debtTab[1]='ديون الزبائن';
 const partner=p=>p.type==='advance'&&p.accountClass==='partner';
 const customer=p=>p.type==='debt';
 const label={safri:'سفري',cash:'سحب نقدي',other:'مبلغ آخر عليه',pay:'تسديد',funding:'مبلغ دفعه للمطعم',sale:'بيع بالدين'};
 let selectedAccount=null,accountQuery='',accountMonth='',accountBusy=false;
-const oldRender=render,oldParties=parties;
+const oldRender=render;
 if(!tabs.some(t=>t[0]==='partners'))tabs.splice(tabs.findIndex(t=>t[0]==='debts')+1,0,['partners','حسابات الشركاء']);
 render=function(){if(tab==='partners'&&profile?.role==='admin'){
  // Reuse the complete existing navigation and cloud/month wrappers.
@@ -307,7 +306,6 @@ render=function(){if(tab==='partners'&&profile?.role==='admin'){
  nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick')==="go('partners')"));
  app.innerHTML=accountsPage(true);return;
 }oldRender();};
-parties=function(type){if(type==='debt')return accountsPage(false);return oldParties(type);};
 const oldGo=go;go=function(t){if(t!==tab){selectedAccount=null;accountQuery='';accountMonth='';}return oldGo(t);};
 const oldRevenueRows=revenueRows;revenueRows=function(rows){return oldRevenueRows(rows.filter(e=>!e.accountTransfer));};
 const oldSummary=revenueSummary;revenueSummary=function(rows){return oldSummary(rows.filter(e=>!e.accountTransfer));};
