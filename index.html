@@ -42,7 +42,7 @@ printParty=function(pid){
  if(actions){const button=document.createElement('button');button.textContent='إرسال عبر واتساب';button.onclick=()=>sharePartyWhatsApp(pid);actions.prepend(button);}
 };
 
-</script><script src="config.js"></script><script src="secure.js?v=receipt-image-20261109"></script><script>
+</script><script src="config.js"></script><script src="secure.js?v=finance-fix-20261114-2"></script><script>
 'use strict';
 // Uses the existing revision-checked state transaction: both revenues commit together.
 const renderBeforeCashier = render;
@@ -87,14 +87,16 @@ function cashierPage() {
   updateNet();
   form.onsubmit=async ev=>{
     ev.preventDefault();
+    if(form.dataset.sending||monthPendingSave)return;
     const f=new FormData(form),kind=f.get('matchKind'),workers=kind==='workers',cashier=String(f.get('cashier')).trim().replace(/\s+/g,' '),shift=String(f.get('shift')).trim(),date=f.get('date'),total=Number(f.get('total')),master=workers?0:Number(f.get('master')),opening=workers?0:Number(f.get('opening'));
     if(!cashier||!shift||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isSafeInteger(total)||total<=0||!Number.isSafeInteger(master)||master<0||master>total||!Number.isSafeInteger(opening)||opening<0||opening>total-master)return alert('تحقق من الاسم والتاريخ والمبالغ؛ مجموع الماستر ودخول الكاشير لا يتجاوز الكلي');
     if(total-opening===0)return alert('الصافي والماستر صفر؛ لا يوجد إيراد لترحيله');
     const status=document.getElementById('cashierStatus');
+    form.dataset.sending='1';
     busy(true);
     try {
       await refreshAdmin();
-      if(cashierGroups().some(r=>r.date===date&&r.cashier===cashier&&r.shift===shift&&(r.kind||'sales')===kind))throw Error('هذه المطابقة مرحّلة سابقاً لنفس الكاشير والتاريخ والشفت');
+      if(cashierGroups().some(r=>r.date===date&&String(r.cashier).trim().replace(/\s+/g,' ').toLocaleLowerCase()===cashier.toLocaleLowerCase()&&String(r.shift).trim()===shift&&(r.kind||'sales')===kind))throw Error('هذه المطابقة مرحّلة سابقاً لنفس الكاشير والتاريخ والشفت');
       const match={id:id(),cashier,shift,date,total,master,opening,kind,workerInvoices:workers?total:0}, next=structuredClone(db),created=Date.now();
       const newRows=(workers?[{amount:total,method:'ذمم عمال'}]:[{amount:total-master-opening,method:'نقدي'},{amount:master,method:'ماستر كارد'}]).filter(e=>e.amount>0).map(e=>({...e,id:id(),type:'income',created,date,category:workers?'مبيعات آجلة للعمال':'مبيعات الكاشير',note:'مطابقة '+cashier+' — شفت '+shift+' — دخول الكاشير '+opening,cashierMatchId:match.id}));
       newRows[0].cashierMatch=match;
@@ -106,7 +108,7 @@ function cashierPage() {
       // Refresh after ambiguous responses: a committed match will block a retry.
       try{await refreshAdmin();}catch(_){}
       status.textContent='لم يتم تأكيد الحفظ: '+error.message+' — عند إعادة المحاولة يتم فحص التكرار أولاً.';
-    } finally {busy(false);}
+    } finally {delete form.dataset.sending;busy(false);}
   };
 }
 async function deleteCashierMatch(matchId) {
@@ -230,7 +232,7 @@ printLedger=function(type){
 if(profile?.role==='admin')render();
 
 
-</script><script src="daily-receipts.js?v=original-photo-20261114-1"></script><script src="notifications.js?v=20261109-1"></script><script src="monthly.js?v=20261111-2"></script><script>
+</script><script src="daily-receipts.js?v=finance-fix-20261114-2"></script><script src="notifications.js?v=20261109-1"></script><script src="monthly.js?v=20261111-2"></script><script>
 // Keep the navigation selection in sync for pages opened outside go().
 (() => {
   const navigation = document.getElementById('nav');
@@ -310,6 +312,7 @@ const oldGo=go;go=function(t){if(t!==tab){selectedAccount=null;accountQuery='';a
 const oldRevenueRows=revenueRows;revenueRows=function(rows){return oldRevenueRows(rows.filter(e=>!e.accountTransfer));};
 const oldSummary=revenueSummary;revenueSummary=function(rows){return oldSummary(rows.filter(e=>!e.accountTransfer));};
 const oldLedger=ledger;ledger=function(type){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldLedger(type);}finally{db.entries=all;}};
+const oldExport=exportCSV;exportCSV=function(){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldExport.apply(this,arguments);}finally{db.entries=all;}};
 const oldReport=showReport;showReport=function(){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldReport();}finally{db.entries=all;}};
 const oldTable=entryTable;entryTable=function(rows,canDelete){const html=oldTable(rows,canDelete);if(!rows.some(e=>e.accountTransfer))return html;const root=document.createElement('div');root.innerHTML=html;const trs=root.querySelectorAll('tbody tr');rows.forEach((e,i)=>{if(e.accountTransfer&&trs[i]?.cells[1])trs[i].cells[1].textContent=e.type==='income'?'قبض حساب':'سحب شريك';});return root.innerHTML;};
 const oldRemoveEntry=removeEntry;removeEntry=function(key){if(db.entries.find(e=>e.id===key)?.accountMovementId)return alert('هذه الحركة مرتبطة بكشف حساب. صحّحها من حساب الشريك أو الزبون حتى يتصحح الصندوق معها.');return oldRemoveEntry(key);};
@@ -352,6 +355,7 @@ window.accountShare=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;co
 
 </script>
 </body></html>
+
 
 
 
