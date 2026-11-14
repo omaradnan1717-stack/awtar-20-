@@ -99,16 +99,43 @@
     }
   }
 
-  openExpenseReceipt = function (button) {
+  openExpenseReceipt = async function (button) {
     const entry = JSON.parse(button.dataset.expenseReceipt);
-    return openReceiptFile(async () => {
-      // Cash receipts and their expense entries share the same request ID.
+    document.getElementById('expenseReceiptDialog')?.remove();
+    const dialog = document.createElement('dialog');
+    dialog.id = 'expenseReceiptDialog';
+    dialog.dir = 'rtl';
+    dialog.style.cssText = 'width:min(94vw,760px);max-height:90vh;overflow:auto;padding:16px;border:1px solid #aaa;border-radius:12px;background:white;color:#111';
+    dialog.innerHTML = '<form method="dialog" class="no-print" style="display:flex;gap:8px;margin-bottom:12px"><button>إغلاق والرجوع</button><button type="button" data-print>طباعة الوصل</button></form><h2>صورة الوصل الأصلي</h2><p>' + esc(datefmt(entry.date)) + ' — ' + esc(fmt(entry.amount)) + '</p><div data-photo role="status">جارٍ تحميل صورة الوصل…</div>';
+    dialog.querySelector('[data-print]').onclick = () => window.print();
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    document.body.append(dialog);
+    dialog.showModal();
+    const area = dialog.querySelector('[data-photo]');
+    try {
       const receiptId = entry.receiptId || entry.id;
-      if (!receiptId) return null;
-      const rows = await api('/rest/v1/awtar_daily_receipts?select=object_path' +
-        '&payment_kind=eq.cash&id=eq.' + encodeURIComponent(receiptId) + '&limit=1');
-      return rows[0]?.object_path;
-    });
+      const rows = receiptId ? await api('/rest/v1/awtar_daily_receipts?select=object_path,mime_type&payment_kind=eq.cash&id=eq.' + encodeURIComponent(receiptId) + '&limit=1') : [];
+      if (!dialog.isConnected) return;
+      const row = rows[0];
+      if (!row?.object_path) { area.textContent = 'ماكو صورة وصل مرفقة بهذه العملية. تفاصيل الصرف: ' + (entry.category || '') + ' — ' + (entry.note || ''); return; }
+      const result = await storage('object/sign/' + bucket + '/' + row.object_path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expiresIn:300})});
+      if (!result.signedURL?.startsWith('/object/sign/')) throw Error('تعذر الحصول على رابط الصورة');
+      if (!dialog.isConnected) return;
+      const url = cfg.url + '/storage/v1' + result.signedURL;
+      area.textContent = '';
+      const link = document.createElement('a');
+      link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'فتح الملف الأصلي'; link.className = 'btn no-print';
+      if (row.mime_type !== 'application/pdf') {
+        const image = new Image();
+        image.alt = 'صورة الوصل الأصلي';
+        image.style.cssText = 'display:block;max-width:100%;height:auto;margin:12px auto';
+        image.onerror = () => { image.remove(); const p=document.createElement('p');p.textContent='تعذر عرض صيغة الصورة هنا؛ اضغط فتح الملف الأصلي.';area.prepend(p); };
+        image.src = url; area.append(image);
+      }
+      area.append(link);
+    } catch (error) {
+      if (dialog.isConnected) area.textContent = 'تعذر تحميل صورة الوصل: ' + error.message;
+    }
   };
 
   document.addEventListener('click',async event=>{
