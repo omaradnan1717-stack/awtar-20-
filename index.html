@@ -520,15 +520,15 @@ window.addEventListener('message',async event=>{
  const rows=event.data.rows;
  if(!Array.isArray(rows)||!rows.length||rows.length>5000)throw Error('بيانات الرواتب غير صالحة');
  const seen=new Set();
- for(const r of rows){if(typeof r.id!=='string'||!r.id||r.id==='undefined'||seen.has(r.id)||!Number.isSafeInteger(r.amount)||r.amount<=0||typeof r.name!=='string'||r.name.length>200||!['workers','delivery'].includes(r.group))throw Error('بيانات الرواتب غير صالحة');seen.add(r.id);ensureDate(r.date);}
+ for(const r of rows){if(typeof r.id!=='string'||!r.id||r.id==='undefined'||seen.has(r.id)||!Number.isSafeInteger(r.amount)||r.amount<=0||typeof r.name!=='string'||r.name.length>200||!['workers','delivery'].includes(r.group)||(r.kind!==undefined&&!['paid','advance'].includes(r.kind)))throw Error('بيانات الرواتب غير صالحة');seen.add(r.id);ensureDate(r.date);}
  await refreshAdmin();
  const next=structuredClone(db),fresh=[];
  for(const r of rows){const key='awtar-staff:'+r.id,previous=next.entries.find(e=>e.payrollSourceId===key);
  if(previous){if(previous.amount!==r.amount||previous.date!==r.date)throw Error('تم تعديل راتب مرحّل سابقاً. صحّح المصروف السابق قبل إعادة الترحيل');continue;}
- fresh.push(r);next.entries.push({id:id(),created:Date.now(),date:r.date,type:'expense',amount:r.amount,method:'نقدي',category:'رواتب',note:(r.group==='delivery'?'راتب دلفري: ':'راتب عامل: ')+r.name,payrollSourceId:key});}
+ fresh.push(r);next.entries.push({id:id(),created:Date.now(),date:r.date,type:'expense',amount:r.amount,method:'نقدي',category:r.kind==='advance'?'سلف العاملين':'رواتب',note:(r.kind==='advance'?(r.group==='delivery'?'سلفة دلفري: ':'سلفة عامل: '):(r.group==='delivery'?'راتب دلفري: ':'راتب عامل: '))+r.name,payrollSourceId:key});}
  if(!fresh.length){payrollImportReceived=true;alert('هذه الرواتب مرحّلة سابقاً؛ لم يُضف مصروف مكرر');return;}
- if(!confirm('ترحيل '+fresh.length+' عملية صرف رواتب بمجموع '+fmt(fresh.reduce((n,r)=>n+r.amount,0))+' إلى المصروفات النقدية؟\nتأكد أن هذه المبالغ لم تُسجّل يدوياً سابقاً.')){payrollImportReceived=true;return;}
- await commitAccounts(next);payrollImportReceived=true;go('expense');alert('تم ترحيل الرواتب إلى المصروفات. إعادة الضغط لا تكررها.');
+ if(!confirm('ترحيل '+fresh.length+' عملية صرف رواتب وسلف بمجموع '+fmt(fresh.reduce((n,r)=>n+r.amount,0))+' إلى المصروفات النقدية؟\nتأكد أن هذه المبالغ لم تُسجّل يدوياً سابقاً.')){payrollImportReceived=true;return;}
+ await commitAccounts(next);payrollImportReceived=true;go('expense');alert('تم ترحيل الرواتب والسلف إلى المصروفات. إعادة الضغط لا تكررها.');
  }catch(error){payrollImportReceived=true;alert('لم يُؤكد الترحيل: '+error.message+' . أعد الترحيل من الرواتب للتحقق بدون تكرار.');}finally{payrollImportBusy=false;}
 });
 const payrollRemoveEntry=removeEntry;
