@@ -537,4 +537,85 @@ removeEntry=function(key){if(db.entries.find(e=>e.id===key)?.payrollSourceId)ret
 })();
 
 </script>
-</body></html>
+<style id="finance-scanner-style">dialog::backdrop{background:#0009}@media print{dialog[aria-label="سكانر الوصل"]{display:none!important}}</style><script id="finance-receipt-scanner">
+(function(){'use strict';
+
+function scanHomography(points){
+ const target=[[0,0],[1,0],[1,1],[0,1]],m=[];
+ target.forEach(([u,v],i)=>{const {x,y}=points[i];m.push([u,v,1,0,0,0,-x*u,-x*v,x],[0,0,0,u,v,1,-y*u,-y*v,y]);});
+ for(let k=0;k<8;k++){let p=k;for(let j=k+1;j<8;j++)if(Math.abs(m[j][k])>Math.abs(m[p][k]))p=j;
+ [m[k],m[p]]=[m[p],m[k]];const d=m[k][k];if(Math.abs(d)<1e-9)throw Error('حرّك الزوايا حتى تحدد مساحة الوصل');
+ for(let j=k;j<9;j++)m[k][j]/=d;
+ for(let i=0;i<8;i++)if(i!==k){const f=m[i][k];for(let j=k;j<9;j++)m[i][j]-=f*m[k][j];}}
+ return m.map(r=>r[8]);
+}
+function scanWarp(source,points,enhance){
+ for(let i=0;i<4;i++){const a=points[i],b=points[(i+1)%4],c=points[(i+2)%4];if((b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x)<20)throw Error('خلّي الزوايا بالترتيب حول الوصل بدون تقاطع');}
+ const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ const w=Math.round(Math.max(dist(points[0],points[1]),dist(points[3],points[2]))),h=Math.round(Math.max(dist(points[0],points[3]),dist(points[1],points[2])));
+ if(w<30||h<30)throw Error('المساحة صغيرة؛ وسّع حدود الوصل');
+ const out=document.createElement('canvas');out.width=w;out.height=h;
+ const ctx=out.getContext('2d'),src=source.getContext('2d').getImageData(0,0,source.width,source.height),dst=ctx.createImageData(w,h),a=scanHomography(points);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){const u=x/(w-1),v=y/(h-1),z=a[6]*u+a[7]*v+1;
+ const sx=Math.max(0,Math.min(source.width-1,(a[0]*u+a[1]*v+a[2])/z)),sy=Math.max(0,Math.min(source.height-1,(a[3]*u+a[4]*v+a[5])/z)),ix=Math.floor(sx),iy=Math.floor(sy),fx=sx-ix,fy=sy-iy,k=(y*w+x)*4;
+ for(let c=0;c<3;c++){const at=(xx,yy)=>src.data[(Math.min(source.height-1,yy)*source.width+Math.min(source.width-1,xx))*4+c];
+ let n=at(ix,iy)*(1-fx)*(1-fy)+at(ix+1,iy)*fx*(1-fy)+at(ix,iy+1)*(1-fx)*fy+at(ix+1,iy+1)*fx*fy;dst.data[k+c]=enhance?Math.max(0,Math.min(255,(n-128)*1.18+140)):n;}dst.data[k+3]=255;}
+ ctx.putImageData(dst,0,0);return out;
+}
+function scanFinanceImage(source){return new Promise(resolve=>{
+ const root=document.createElement('dialog');root.style.cssText='padding:0;border:0;border-radius:16px;width:min(510px,96vw);max-height:94dvh;background:#fff;color:#172e58;';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','سكانر الوصل');
+ root.innerHTML='<div class="modal" style="padding:18px;max-height:90dvh;overflow:auto" dir="rtl"><h2>سكانر الوصل</h2><p>اسحب الدوائر الأربع على زوايا الوصل، ثم اضغط قص ومعاينة.</p><canvas style="width:100%;display:block;touch-action:none;direction:ltr;border-radius:8px"></canvas><label><input type="checkbox" style="width:auto" checked> تحسين وضوح الوصل</label><p role="status"></p><div class="actions"><button type="button" data-action="preview" class="primary">قص ومعاينة</button><button type="button" data-action="reset">إعادة التحديد</button><button type="button" data-action="save" class="primary" disabled>اعتماد الصورة</button><button type="button" data-action="cancel">إلغاء</button></div></div>';
+ document.body.append(root);root.showModal();
+ const cv=root.querySelector('canvas'),cx=cv.getContext('2d'),status=root.querySelector('[role=status]'),save=root.querySelector('[data-action=save]'),enhance=root.querySelector('input');
+ cv.width=source.width;cv.height=source.height;let points,drag=-1,result=null;
+ const draw=()=>{cx.clearRect(0,0,cv.width,cv.height);cx.drawImage(result||source,0,0,cv.width,cv.height);if(result)return;
+ cx.fillStyle='#0006';cx.beginPath();cx.rect(0,0,cv.width,cv.height);cx.moveTo(points[0].x,points[0].y);for(let i=3;i>=0;i--)cx.lineTo(points[i].x,points[i].y);cx.closePath();cx.fill('evenodd');
+ const r=cv.width/22;cx.strokeStyle='#00ddff';cx.lineWidth=cv.width/200;cx.beginPath();points.forEach((p,i)=>i?cx.lineTo(p.x,p.y):cx.moveTo(p.x,p.y));cx.closePath();cx.stroke();
+ points.forEach((p,i)=>{cx.beginPath();cx.arc(p.x,p.y,r,0,Math.PI*2);cx.fillStyle='#1455e8';cx.fill();cx.strokeStyle='#fff';cx.stroke();cx.fillStyle='#fff';cx.font='bold '+r+'px sans-serif';cx.textAlign='center';cx.textBaseline='middle';cx.fillText(i+1,p.x,p.y);});};
+ const reset=()=>{result=null;save.disabled=true;points=[{x:0,y:0},{x:cv.width-1,y:0},{x:cv.width-1,y:cv.height-1},{x:0,y:cv.height-1}];status.textContent='حدد الزوايا يدوياً على حدود الورقة.';draw();};
+ const pos=e=>{const r=cv.getBoundingClientRect();return {x:Math.max(0,Math.min(cv.width-1,(e.clientX-r.left)*cv.width/r.width)),y:Math.max(0,Math.min(cv.height-1,(e.clientY-r.top)*cv.height/r.height))};};
+ cv.onpointerdown=e=>{if(result)return;const p=pos(e);drag=points.reduce((best,q,i)=>Math.hypot(q.x-p.x,q.y-p.y)<Math.hypot(points[best].x-p.x,points[best].y-p.y)?i:best,0);cv.setPointerCapture(e.pointerId);points[drag]=p;draw();};
+ cv.onpointermove=e=>{if(drag<0)return;points[drag]=pos(e);draw();};cv.onpointerup=cv.onpointercancel=()=>{drag=-1;};
+ enhance.onchange=()=>{if(result){result=null;save.disabled=true;draw();}};
+ root.querySelector('[data-action=preview]').onclick=()=>{try{result=scanWarp(source,points,enhance.checked);draw();save.disabled=false;status.textContent='معاينة الوصل بعد القص وتصحيح الميلان. اضغط اعتماد الصورة أو إعادة التحديد.';}catch(e){status.textContent=e.message;}};
+ root.querySelector('[data-action=reset]').onclick=reset;
+ const previous=document.activeElement;const close=(value=null)=>{root.close();root.remove();if(previous?.isConnected)previous.focus();resolve(value);};root.addEventListener('cancel',e=>{e.preventDefault();close();});
+ root.querySelector('[data-action=cancel]').onclick=close;
+ save.onclick=()=>{if(result)close(result);};
+ root.onkeydown=e=>{if(e.key==='Escape'){e.stopPropagation();close();}};reset();root.querySelector('button').focus();
+});}
+
+const scannedInputs=new WeakSet(),scanningForms=new WeakSet();
+document.addEventListener('submit',event=>{
+ if(scanningForms.has(event.target)){event.preventDefault();event.stopImmediatePropagation();alert('أكمل قص الوصل أو ألغِ السكانر أولاً.');}
+},true);
+document.addEventListener('change',async event=>{
+ const input=event.target;
+ if(!(input instanceof HTMLInputElement)||input.type!=='file'||scannedInputs.has(input))return;
+ const files=[...input.files],images=files.filter(f=>f.type.startsWith('image/')||/\.(jpe?g|png|webp|heic|heif)$/i.test(f.name));
+ if(!images.length)return;
+ event.stopImmediatePropagation();
+ const form=input.form;if(form)scanningForms.add(form);
+ const urlList=[];let cancelled=false;
+ try{
+  const processed=[];
+  for(const file of files){
+   if(!images.includes(file)){processed.push(file);continue;}
+   const url=URL.createObjectURL(file);urlList.push(url);const im=new Image();
+   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(Error('تعذّر فتح الصورة؛ جرّب صورة JPG أو لقطة شاشة.'));im.src=url;});
+   const k=Math.min(1,1800/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.naturalWidth*k));c.height=Math.max(1,Math.round(im.naturalHeight*k));
+   const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(im,0,0,c.width,c.height);
+   const result=await scanFinanceImage(c);if(!result){cancelled=true;break;}
+   const blob=await new Promise(resolve=>result.toBlob(resolve,'image/jpeg',.88));if(!blob)throw Error('تعذّر تجهيز الوصل، جرّب مرة ثانية.');
+   processed.push(new File([blob],file.name.replace(/\.[^.]+$/,'')+'-scan.jpg',{type:'image/jpeg',lastModified:Date.now()}));
+  }
+  if(!input.isConnected)return;
+  if(cancelled){input.value='';return;}
+  const transfer=new DataTransfer();processed.forEach(file=>transfer.items.add(file));input.files=transfer.files;
+  scannedInputs.add(input);try{input.dispatchEvent(new Event('change',{bubbles:true}));}finally{scannedInputs.delete(input);}
+ }catch(error){input.value='';alert(error.message);}
+ finally{urlList.forEach(url=>URL.revokeObjectURL(url));if(form)scanningForms.delete(form);}
+},true);
+
+})();
+</script></body></html>
