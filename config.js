@@ -1,5 +1,2 @@
-// Set these public project values once before publishing to hide setup for visitors.
-// Never put service_role or sb_secret keys in this file.
-window.AWTAR_CONFIG = null;
-// Example: window.AWTAR_CONFIG = {url:'https://YOURPROJECT.supabase.co',key:'YOUR_PUBLIC_KEY'};
-
+// Public browser configuration. Access remains protected by sign-in and database policies.
+window.AWTAR_CONFIG = {url:'https://yltfcxzlioqkdmvwzylr.supabase.co',key:'sb_publishable_7MEBILCxzmAIa4zGzGDvKA_D7JS5Dyh'};
