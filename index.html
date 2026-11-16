@@ -532,7 +532,23 @@ window.addEventListener('message',async event=>{
  }catch(error){payrollImportReceived=true;alert('لم يُؤكد الترحيل: '+error.message+' . أعد الترحيل من الرواتب للتحقق بدون تكرار.');}finally{payrollImportBusy=false;}
 });
 const payrollRemoveEntry=removeEntry;
-removeEntry=function(key){if(db.entries.find(e=>e.id===key)?.payrollSourceId)return alert('مصروف مرتبط بالرواتب. لا تحذفه حتى لا ينفصل عن سجل الترحيل.');return payrollRemoveEntry(key);};
+removeEntry=async function(key){
+ const entry=db.entries.find(e=>e.id===key);
+ if(!entry?.payrollSourceId)return payrollRemoveEntry(key);
+ try{
+  if(profile?.role!=='admin')throw Error('حذف المصروف المرحّل متاح للمدير فقط');
+  if(!confirm('حذف مصروف الرواتب المرحّل بقيمة '+fmt(entry.amount)+'؟\n'+entry.note+'\nالحذف هنا لا يحذف عملية الرواتب. احذفها من الرواتب أيضاً إذا كانت تجريبية أو ملغاة؛ بقاؤها هناك يسمح بترحيلها مجدداً.'))return;
+  await refreshAdmin();
+  const current=db.entries.find(e=>e.id===key);
+  if(!current){render();return alert('المصروف محذوف مسبقاً');}
+  if(current.payrollSourceId!==entry.payrollSourceId||current.amount!==entry.amount||current.date!==entry.date)throw Error('تغيّر المصروف. راجعه قبل الحذف');
+  ensureDate(current.date);
+  const next=structuredClone(db);
+  next.entries=next.entries.filter(e=>e.id!==key);
+  await commitAccounts(next);
+  alert('تم حذف المصروف المرحّل وتصحيح الرصيد');
+ }catch(error){alert(error.message);}
+};
 
 })();
 
