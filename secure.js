@@ -42,6 +42,45 @@ employee = async function () {
 };
 
 let dailyPoll = null;
+let cancellingTopup = false;
+
+function fundTopupRows(data) {
+  const topups = [...(data.topups || [])].sort((a, b) =>
+    b.date.localeCompare(a.date) || Number(b.created || 0) - Number(a.created || 0)
+  );
+  if (!topups.length) return '<p>ماكو تعزيزات مسجلة.</p>';
+
+  return `<div class="scroll"><table>
+    <thead><tr><th>التاريخ</th><th>المبلغ</th><th>البيان</th><th>الإجراء</th></tr></thead>
+    <tbody>${topups.map(t => `<tr>
+      <td>${esc(datefmt(t.date))}</td><td>${fmt(t.amount)}</td>
+      <td>${esc(t.note || '')}</td>
+      <td><button type="button" class="danger" data-cancel-topup="${esc(t.id)}"
+        data-topup-amount="${esc(fmt(t.amount))}" data-topup-date="${esc(datefmt(t.date))}"
+        ${cancellingTopup ? 'disabled' : ''}>إلغاء التعزيز</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+async function cancelFundTopup(event) {
+  const button = event.target.closest('button[data-cancel-topup]');
+  if (!button || cancellingTopup || profile?.role !== 'admin') return;
+  const { cancelTopup, topupAmount, topupDate } = button.dataset;
+  if (!confirm('إلغاء تعزيز ' + topupAmount + ' بتاريخ ' + topupDate + '؟')) return;
+
+  cancellingTopup = true;
+  busy(true);
+  try {
+    await api('/rest/v1/rpc/awtar_cash_cancel_topup', { topup_id: cancelTopup });
+    alert('تم إلغاء التعزيز وتصحيح الرصيد');
+  } catch (error) {
+    alert('لم يتم تأكيد الإلغاء: ' + error.message);
+  } finally {
+    cancellingTopup = false;
+    await refreshFund();
+    busy(false);
+  }
+}
 
 async function sharedDaily() {
   if (!profile) return;
@@ -83,12 +122,17 @@ async function sharedDaily() {
             <input name="details" required maxlength="300"></div>
           <button>زيادة الرصيد</button>
         </form>
+        <h3>سجل تعزيزات العهدة</h3>
+        <div id="fundTopups">${fundTopupRows(data)}</div>
       </section>` : ''}`;
 
     document.getElementById('cloudSpend').onsubmit =
       e => recordFund(e, 'spend');
     const top = document.getElementById('cloudTopup');
-    if (top) top.onsubmit = e => recordFund(e, 'topup');
+    if (top) {
+      top.onsubmit = e => recordFund(e, 'topup');
+      document.getElementById('fundTopups').onclick = cancelFundTopup;
+    }
     dailyPoll = setInterval(refreshFund, 10000);
   } catch (x) {
     alert(x.message);
@@ -298,6 +342,8 @@ async function refreshFund() {
     }
     rows.innerHTML = sharedRows(d, openDays);
     rows.dataset.today = day;
+    const topups = document.getElementById('fundTopups');
+    if (topups) topups.innerHTML = fundTopupRows(d);
     const spend = document.getElementById('cloudSpend');
     if (!spend?.dataset.pending && !spend?.dataset.sending)
       syncDailyDate(spend?.elements.expense_date, day);
