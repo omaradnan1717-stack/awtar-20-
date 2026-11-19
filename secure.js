@@ -70,9 +70,8 @@ async function sharedDaily() {
         </form>
       </section>
       <section class="panel">
-        <h2>وصولات صرف اليوم</h2>
-        <p id="fundDay">${datefmt(awtarToday())}</p>
-        <div id="fundRows">${sharedRows(data)}</div>
+        <h2>سجل الصرفيات اليومية</h2>
+        <div id="fundRows" data-today="${awtarToday()}">${sharedRows(data)}</div>
       </section>
       ${profile.role === 'admin' ? `
       <section class="panel">
@@ -290,9 +289,15 @@ async function refreshFund() {
     const d = await api('/rest/v1/rpc/awtar_cash_summary', {});
     if (!document.getElementById('fundTotals')) return;
     document.getElementById('fundTotals').innerHTML = sharedTotals(d);
-    document.getElementById('fundRows').innerHTML = sharedRows(d);
+    const rows = document.getElementById('fundRows');
     const day = awtarToday();
-    document.getElementById('fundDay').textContent = datefmt(day);
+    const openDays = new Map();
+    for (const group of rows.querySelectorAll('details[data-fund-date]')) {
+      if (group.dataset.fundDate !== rows.dataset.today || rows.dataset.today === day)
+        openDays.set(group.dataset.fundDate, group.open);
+    }
+    rows.innerHTML = sharedRows(d, openDays);
+    rows.dataset.today = day;
     const spend = document.getElementById('cloudSpend');
     if (!spend?.dataset.pending && !spend?.dataset.sending)
       syncDailyDate(spend?.elements.expense_date, day);
@@ -1155,12 +1160,24 @@ sharedTotals = function (d) {
 };
 
 const legacyDailyRows = sharedRows;
-sharedRows = function (d) {
-  const day = awtarToday();
-  return legacyDailyRows({
-    ...d,
-    entries: d.entries.filter(e => e.date === day)
-  });
+sharedRows = function (d, openDays = new Map()) {
+  const today = awtarToday();
+  const groups = new Map([[today, []]]);
+  for (const entry of d.entries) {
+    if (!groups.has(entry.date)) groups.set(entry.date, []);
+    groups.get(entry.date).push(entry);
+  }
+
+  return [...groups.keys()].sort().reverse().map(day => {
+    const entries = groups.get(day);
+    const total = entries.reduce((amount, entry) => amount + Number(entry.amount), 0);
+    const isToday = day === today;
+    const open = openDays.get(day) ?? isToday;
+    return `<details class="daily-ledger-day" data-fund-date="${esc(day)}"${open ? ' open' : ''}>
+      <summary><strong>${isToday ? 'اليوم · ' : ''}${esc(datefmt(day))}</strong><span>${fmt(total)}</span></summary>
+      ${legacyDailyRows({ ...d, entries })}
+    </details>`;
+  }).join('');
 };
 
 const legacyDailyHTML = reportDailyHTML;
