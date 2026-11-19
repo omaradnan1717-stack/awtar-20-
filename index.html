@@ -159,15 +159,13 @@ function mountMasterReceipts(form,field="master",title="وصولات الماس�
    const amount=parseMasterReceipt(input.value),total=amounts.reduce((a,b)=>a+b,0)+amount;
    if(!Number.isSafeInteger(total))throw Error('مجموع الوصولات أكبر من الحد المسموح');
    if(!amounts.length && Number(master.value)>0 && !confirm('استبدال المبلغ الحالي بمجموع القائمة؟'))return;
-   amounts.push(amount);input.value='';status.textContent='';draw(true);input.focus();
+   amounts.push(amount);input.value='';input.setCustomValidity('');status.textContent='';draw(true);input.focus();
   }catch(e){status.textContent=e.message;}
  }
  box.querySelector('[data-add-receipt]').onclick=add;
  input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();add();}});
  // An unadded receipt must never silently disappear during final submission.
  input.addEventListener('input',()=>input.setCustomValidity(input.value.trim()?'اضغط إضافة الوصل أولاً':''));
- box.querySelector('[data-add-receipt]').addEventListener('click',()=>{if(!input.value)input.setCustomValidity('');});
- input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!input.value)input.setCustomValidity('');});
  box.querySelector('[data-clear-receipts]').onclick=()=>{
   if(!amounts.length)return;
   if(!confirm('مسح القائمة وتصفير المبلغ؟'))return;
