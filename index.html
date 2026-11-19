@@ -505,7 +505,7 @@ window.openAccount=pid=>{selectedAccount=pid;accountMonth='';render();};
 window.backAccounts=()=>{selectedAccount=null;accountMonth='';render();};
 window.accountMonthChanged=value=>{accountMonth=value;render();};
 function detail(p,isPartner){const rows=accountRows(p),adds=sum(p.movements.filter(m=>m.kind==='add')),pays=sum(p.movements.filter(m=>m.kind==='pay'));
-return `<section class="panel"><div class="topline"><h2>${esc(p.name)}</h2><button onclick="backAccounts()">رجوع للحسابات</button></div><p dir="ltr">${esc(p.phone||'')}</p><div class="actions">${phoneLink(p)}<button onclick="editAccount('${p.id}')">تعديل الاسم / الرقم</button><button onclick="accountShare('${p.id}')">إرسال الكشف واتساب</button><button onclick="accountPrint('${p.id}')">طباعة الكشف</button><button data-invoice-party="${esc(p.id)}" type="button">📎 فواتير الحساب</button></div><div class="cards">${stat('إجمالي المبالغ المسجلة عليه',adds)}${stat('التسديد والمبالغ لصالحه',pays)}${stat(balance(p)>=0?'المتبقي عليه — كل الفترات':'المتبقي إله — كل الفترات',Math.abs(balance(p)))}${isPartner?stat('إجمالي السفري',sum(p.movements.filter(m=>m.category==='safri')))+stat('السحب النقدي',sum(p.movements.filter(m=>m.category==='cash')))+stat('المبالغ الأخرى عليه',sum(p.movements.filter(m=>m.category==='other')))+stat('مبالغ دفعها للمطعم',sum(p.movements.filter(m=>m.category==='funding'))):''}</div></section>
+return `<section class="panel"><div class="topline"><h2>${esc(p.name)}</h2><button onclick="backAccounts()">رجوع للحسابات</button></div><p dir="ltr">${esc(p.phone||'')}</p><div class="actions">${phoneLink(p)}<button onclick="editAccount('${p.id}')">تعديل الاسم / الرقم</button><button onclick="accountShare('${p.id}')">إرسال الكشف واتساب</button>${isPartner?'':'<button type="button" onclick="shareDebtImage()">مشاركة الكشف كصورة</button>'}<button onclick="accountPrint('${p.id}')">طباعة الكشف</button><button data-invoice-party="${esc(p.id)}" type="button">📎 فواتير الحساب</button></div><div class="cards">${stat('إجمالي المبالغ المسجلة عليه',adds)}${stat('التسديد والمبالغ لصالحه',pays)}${stat(balance(p)>=0?'المتبقي عليه — كل الفترات':'المتبقي إله — كل الفترات',Math.abs(balance(p)))}${isPartner?stat('إجمالي السفري',sum(p.movements.filter(m=>m.category==='safri')))+stat('السحب النقدي',sum(p.movements.filter(m=>m.category==='cash')))+stat('المبالغ الأخرى عليه',sum(p.movements.filter(m=>m.category==='other')))+stat('مبالغ دفعها للمطعم',sum(p.movements.filter(m=>m.category==='funding'))):''}</div></section>
 <section class="panel"><h2>تسجيل حركة</h2><form onsubmit="recordAccountMovement(event,'${p.id}')"><div><label>التاريخ</label><input name="date" type="date" value="${today()}" max="${today()}" required></div><div><label>الحركة</label><select name="category" onchange="accountCategoryChanged(this.form)">${(isPartner?['safri','cash','other','pay','funding']:['sale','pay']).map(k=>`<option value="${k}">${label[k]}</option>`).join('')}</select></div>${moneyField}<div><label>التفاصيل / رقم الوصل</label><input name="note" maxlength="300"></div><div id="accountSaleBox" ${isPartner?'hidden':''}><label>احتساب المبيعات</label><select name="saleMode" required ${isPartner?'disabled':''}><option value="">اختر طريقة تسجيل البيع</option><option value="new">مبيعات جديدة لم تُسجّل — أضف بيعاً آجلاً</option><option value="recorded">مسجلة سابقاً كبيع آجل — لا تضفها مرة ثانية</option></select><p class="muted">إذا احتُسب الدين ضمن نقد مطابقة الكاشير، صحّح المطابقة أولاً؛ الدين ليس نقداً مستلماً.</p></div><div><label>صورة الوصل (اختياري)</label><input name="receipt" type="file" accept="image/*"><label>أو تصوير بالكاميرا</label><input name="camera" type="file" accept="image/*" capture="environment"></div><p class="muted" style="grid-column:1/-1">السفري يُسجّل بالمبلغ المتفق عليه (كلفة أو سعر بيع) ولا يُخصم نقداً. السحب النقدي ينقص الصندوق، والتسديد النقدي يزيده دون احتسابه مبيعات جديدة. المبلغ الذي يدفعه الشريك للمطعم هنا هو نقد يودعه بالصندوق؛ المصروف الذي يدفعه مباشرةً لمجهز يُسجّل «مبلغاً لصالحه بدون إيداع نقدي».</p>${isPartner?'<div><label>عند مبلغ دفعه للمطعم</label><select name="fundingMode"><option value="cash">إيداع نقدي بالصندوق</option><option value="noncash">مبلغ لصالحه بدون إيداع نقدي</option></select></div>':''}<button type="submit">حفظ الحركة</button><p id="accountSaveStatus" role="status"></p></form></section>
 <section class="panel"><h2>كشف الحركات</h2><label>تصفية الشهر — اتركه فارغاً لكل الفترات</label><input type="month" value="${esc(accountMonth)}" onchange="accountMonthChanged(this.value)"><p class="muted">المبالغ بالأعلى لكل الفترات. ${!isPartner?'الحركات القديمة لم تُربط تلقائياً بالصندوق؛ لا تُعد تسجيل تسديد قديم موجود بالإيرادات.':''}</p>${movementTable(p,rows,true)}</section>`;}
 window.accountCategoryChanged=f=>{const box=f.querySelector('#accountSaleBox');if(box){const sale=f.elements.category.value==='sale';box.hidden=!sale;f.elements.saleMode.disabled=!sale;}};
@@ -523,6 +523,81 @@ window.deleteAccountMovement=async(pid,mid)=>{try{const p=db.parties.find(p=>p.i
 const oldRemoveMovement=removeMovement;removeMovement=function(pid,mid){const m=db.parties.find(p=>p.id===pid)?.movements.find(m=>m.id===mid);return m?.accountVersion?window.deleteAccountMovement(pid,mid):oldRemoveMovement(pid,mid);};
 window.accountReceipt=(pid,mid)=>{const p=db.parties.find(p=>p.id===pid),m=p?.movements.find(m=>m.id===mid);if(!m?.receipt?.startsWith('data:image/jpeg;base64,'))return;openStatement('وصل '+p.name,`<p>${datefmt(m.date)} — ${fmt(m.amount)} — ${esc(m.note)}</p><img alt="صورة الوصل" src="${esc(m.receipt)}" style="max-width:100%;height:auto">`);};
 window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;openStatement('كشف '+p.name,`<p>${esc(p.phone||'')} — ${accountMonth?esc(accountMonth):'كل الفترات'}</p><h3>${balance(p)>=0?'المتبقي عليه':'المتبقي إله'}: ${fmt(Math.abs(balance(p)))}</h3>${movementTable(p,accountRows(p),false)}`);};
+
+window.shareDebtImage=async function(){
+  const p=currentAccount();
+  if(!p||!customer(p))return;
+  try{
+    const canvas=document.createElement('canvas');
+    canvas.width=900;
+    const ctx=canvas.getContext('2d');
+    const font='28px system-ui, sans-serif';
+    const rows=accountRows(p);
+    const lines=[
+      'كشف حساب: '+p.name,
+      'تاريخ الكشف: '+datefmt(today()),
+      accountMonth?'حركات الشهر: '+accountMonth:'حركات كل الفترات',
+      'إجمالي الديون لكل الفترات: '+fmt(sum(p.movements.filter(m=>m.kind==='add'))),
+      'إجمالي التسديدات لكل الفترات: '+fmt(sum(p.movements.filter(m=>m.kind==='pay'))),
+      (balance(p)>=0?'المتبقي عليه: ':'الرصيد لصالحه: ')+fmt(Math.abs(balance(p))),
+      '',
+      ...rows.flatMap(m=>[
+        datefmt(m.date)+' | '+(label[m.category]||(m.kind==='add'?'دين سابق':'تسديد سابق'))+' | '+fmt(m.amount),
+        ...(m.note?[m.note]:[])
+      ]),
+      ...(!rows.length?['لا توجد حركات للفترة المحددة']:[])
+    ];
+    ctx.font=font;
+    const wrapped=lines.flatMap(line=>{
+      const result=[];
+      let part='';
+      for(const char of String(line)){
+        if(char==='\n'||ctx.measureText(part+char).width>800){
+          const space=char==='\n'?-1:part.lastIndexOf(' ');
+          result.push(space>0?part.slice(0,space):part);
+          part=space>0?part.slice(space+1):'';
+        }
+        if(char!=='\n')part+=char;
+      }
+      return [...result,part];
+    });
+    const files=[];
+    for(let start=0;start<wrapped.length;start+=48){
+      const page=wrapped.slice(start,start+48);
+      canvas.height=160+page.length*42;
+      ctx.fillStyle='#ffffff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='#102a2b';
+      ctx.fillRect(0,0,canvas.width,85);
+      ctx.direction='rtl';
+      ctx.textAlign='right';
+      ctx.font='bold 33px system-ui, sans-serif';
+      ctx.fillStyle='#ffffff';
+      ctx.fillText('مطعم وكافيه أوتار — كشف الديون',850,55);
+      ctx.font=font;
+      ctx.fillStyle='#203134';
+      page.forEach((line,i)=>ctx.fillText(line,850,130+i*42));
+      const png=canvas.toDataURL('image/png').split(',')[1];
+      const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0));
+      files.push(new File([bytes],'كشف-ديون-أوتار-'+(files.length+1)+'.png',{type:'image/png'}));
+    }
+    if(navigator.canShare?.({files})){
+      await navigator.share({files});
+    }else{
+      for(const file of files){
+        const url=URL.createObjectURL(file);
+        const link=document.createElement('a');
+        link.href=url;
+        link.download=file.name;
+        link.click();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+      }
+    }
+  }catch(error){
+    if(error.name!=='AbortError')alert('تعذّرت مشاركة صورة الكشف. حاول مرة ثانية.');
+  }
+};
+
 window.accountShare=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;const phone=whatsappPhone(p.phone);if(!phone)return alert('أضف رقم هاتف صحيحاً أولاً');const rows=accountRows(p),text=['مطعم وكافيه أوتار','كشف حساب: '+p.name,accountMonth?'الشهر: '+accountMonth:'كل الفترات',...rows.map(m=>`${datefmt(m.date)} | ${label[m.category]||(m.kind==='add'?'إضافة':'تسديد')} | ${fmt(m.amount)} | ${m.note||''}`),(balance(p)>=0?'المتبقي عليه: ':'المتبقي إله: ')+fmt(Math.abs(balance(p)))].join('\n');window.open('https://wa.me/'+phone.replace(/^\+/,'')+'?text='+encodeURIComponent(text),'_blank','noopener');};
 
 // Receive paid salary operations only from the explicitly opened payroll window.
