@@ -48,6 +48,10 @@ printParty=function(pid){
 const renderBeforeCashier = render;
 render = function() {
   renderBeforeCashier();
+  const incomeForm = tab === 'income' && document.getElementById('master-income-form');
+  if (incomeForm && !incomeForm.elements.amount.disabled) {
+    mountMasterReceipts(incomeForm, 'amount', 'وصولات الماستر', 'مبلغ إيراد الماستر', 'حفظ إيراد ماستر');
+  }
   if (profile?.role === 'admin') nav.insertAdjacentHTML('afterbegin','<button onclick="cashierPage()">مطابقة الكاشير</button>');
 };
 function cashierGroups() {
@@ -135,10 +139,11 @@ function parseMasterReceipt(value){
  if(!Number.isSafeInteger(amount)||amount<=0)throw Error('مبلغ الوصل يجب أن يكون أكبر من صفر');
  return amount;
 }
-function mountMasterReceipts(form,field="master",title="وصولات الماستر"){
+function mountMasterReceipts(form,field="master",title="وصولات الماستر",
+  amountLabel=field==="master"?"الماستر":"المبيعات الكلية",saveLabel="حفظ وترحيل المطابقة"){
  const master=form.elements[field];
  const box=document.createElement('div');box.style.gridColumn='1 / -1';
- box.innerHTML=`<details><summary>جمع ${title}</summary><p>أضف مبلغ كل وصل؛ المجموع ينتقل تلقائياً إلى خانة ${field === "master" ? "الماستر" : "المبيعات الكلية"}. الحفظ يتم بزر حفظ وترحيل المطابقة.</p><label>مبلغ الوصل<input data-receipt-amount type="text" inputmode="numeric" autocomplete="off" placeholder="مثال: 15,000" dir="ltr"></label><button type="button" data-add-receipt>إضافة الوصل</button><ol data-receipt-list></ol><p data-receipt-total></p><button type="button" class="light" data-clear-receipts>مسح قائمة الوصولات</button><p data-receipt-status role="status"></p></details>`;
+ box.innerHTML=`<details><summary>جمع ${title}</summary><p>أضف مبلغ كل وصل؛ المجموع ينتقل تلقائياً إلى خانة ${amountLabel}. الحفظ يتم بزر ${saveLabel}.</p><label>مبلغ الوصل<input data-receipt-amount type="text" inputmode="numeric" autocomplete="off" placeholder="مثال: 15,000" dir="ltr"></label><button type="button" data-add-receipt>إضافة الوصل</button><ol data-receipt-list></ol><p data-receipt-total></p><button type="button" class="light" data-clear-receipts>مسح قائمة الوصولات</button><p data-receipt-status role="status"></p></details>`;
  master.parentElement.insertAdjacentElement('afterend',box);
  const input=box.querySelector('[data-receipt-amount]'),list=box.querySelector('[data-receipt-list]'),summary=box.querySelector('[data-receipt-total]'),status=box.querySelector('[data-receipt-status]');
  let amounts=[];
@@ -206,7 +211,7 @@ ledger = function(type) {
   const other=all.filter(e=>!['نقدي','ماستر كارد','ذمم عمال'].includes(e.method));
   return '<section class="panel"><button onclick="cashierPage()">مطابقة الكاشير</button></section>'+ 
     '<section class="panel"><h2>ملخص الإيرادات المسجلة</h2>'+revenueSummary(db.entries)+'</section>'+ 
-    groups.map(([title,method])=>`<section class="panel"><h2>إضافة ${title}</h2><form onsubmit="addEntry(event,'income')">${dateField.replace(/value="[^"]*"/,`value="${today()}"`)}${moneyField}<input type="hidden" name="method" value="${method}"><div><label>التصنيف</label><select name="category">${['مبيعات المطعم','مبيعات الكافيه','توصيل','إيراد آخر'].map(c=>`<option>${c}</option>`).join('')}</select></div>${noteField}<button>حفظ ${title}</button></form></section><section class="panel"><div class="topline"><h2>سجل ${title}</h2><b>${fmt(sum(all.filter(e=>e.method===method)))}</b></div>${entryTable(all.filter(e=>e.method===method),true)}</section>`).join('')+
+    groups.map(([title,method])=>`<section class="panel"><h2>إضافة ${title}</h2><form${method==='ماستر كارد'?' id="master-income-form"':''} onsubmit="addEntry(event,'income')">${dateField.replace(/value="[^"]*"/,`value="${today()}"`)}${moneyField}<input type="hidden" name="method" value="${method}"><div><label>التصنيف</label><select name="category">${['مبيعات المطعم','مبيعات الكافيه','توصيل','إيراد آخر'].map(c=>`<option>${c}</option>`).join('')}</select></div>${noteField}<button>حفظ ${title}</button></form></section><section class="panel"><div class="topline"><h2>سجل ${title}</h2><b>${fmt(sum(all.filter(e=>e.method===method)))}</b></div>${entryTable(all.filter(e=>e.method===method),true)}</section>`).join('')+
     (workers.length?'<section class="panel"><h2>فواتير العمال — مبيعات آجلة</h2>'+entryTable(workers,true)+'</section>':'')+
     (other.length?'<section class="panel"><h2>إيرادات بطرق أخرى</h2>'+entryTable(other,true)+'</section>':'')+
     '<p class="notice">المتبقي يُحسب بعد طرح المصروفات المسجّلة لنفس الفترة وبحسب طريقة الدفع. هذا المتبقي لا يشمل الرصيد السابق أو تحويل عهدة الصرف. فواتير العمال تدخل بإجمالي المبيعات، ولا تزيد النقدي أو الماستر. إضافتها للعمال واستقطاعها من الرواتب يتم يدوياً. الماستر يدخل بإجمالي الإيرادات، ولا يدخل برصيد الصندوق النقدي. إيرادات مطابقة الكاشير تظهر تلقائياً هنا؛ لا تسجّلها مرة ثانية.</p>';
