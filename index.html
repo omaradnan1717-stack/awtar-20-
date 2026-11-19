@@ -46,6 +46,7 @@ function partyWhatsAppText(p){
 }
 function sharePartyWhatsApp(pid){
  const p=db.parties.find(x=>x.id===pid);if(!p)return alert('الحساب غير موجود');
+ if(p.type==='debt')return window.shareDebtImage(pid);
  let phone=whatsappPhone(p.phone);
  if(!phone){const entered=prompt('أدخل رقم واتساب صاحب الحساب مع رمز الدولة، مثال: 9647701234567',p.phone||'');if(entered===null)return;phone=whatsappPhone(entered);if(!phone)return alert('رقم الهاتف غير صحيح. أدخل رقم الموبايل مع رمز الدولة.');}
  window.location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(partyWhatsAppText(p));
@@ -535,60 +536,72 @@ window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;op
 window.shareDebtImage=async function(pid){
   const p=pid===undefined?currentAccount():db.parties.find(account=>account.id===pid);
   if(!p||!customer(p))return;
-  const month=pid===undefined?accountMonth:'';
-  const rows=pid===undefined?accountRows(p):p.movements.slice().sort((a,b)=>a.date.localeCompare(b.date));
   try{
-    const canvas=document.createElement('canvas');
-    canvas.width=900;
-    const ctx=canvas.getContext('2d');
-    const font='28px system-ui, sans-serif';
-    const lines=[
-      'كشف حساب: '+p.name,
-      'تاريخ الكشف: '+datefmt(today()),
-      month?'حركات الشهر: '+month:'حركات كل الفترات',
-      'إجمالي الديون لكل الفترات: '+fmt(sum(p.movements.filter(m=>m.kind==='add'))),
-      'إجمالي التسديدات لكل الفترات: '+fmt(sum(p.movements.filter(m=>m.kind==='pay'))),
-      (balance(p)>=0?'المتبقي عليه: ':'الرصيد لصالحه: ')+fmt(Math.abs(balance(p))),
-      '',
-      ...rows.flatMap(m=>[
-        datefmt(m.date)+' | '+(label[m.category]||(m.kind==='add'?'دين سابق':'تسديد سابق'))+' | '+fmt(m.amount),
-        ...(m.note?[m.note]:[])
-      ]),
-      ...(!rows.length?['لا توجد حركات للفترة المحددة']:[])
-    ];
-    ctx.font=font;
-    const wrapped=lines.flatMap(line=>{
-      const result=[];
-      let part='';
-      for(const char of String(line)){
-        if(char==='\n'||ctx.measureText(part+char).width>800){
-          const space=char==='\n'?-1:part.lastIndexOf(' ');
-          result.push(space>0?part.slice(0,space):part);
-          part=space>0?part.slice(space+1):'';
-        }
-        if(char!=='\n')part+=char;
-      }
-      return [...result,part];
+    let running=0;
+    const rows=p.movements.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
+      running+=(m.kind==='add'?1:-1)*Number(m.amount);
+      return [datefmt(m.date),m.kind==='add'?'إضافة':'تسديد',fmt(m.amount),fmt(running),m.note||''];
     });
+    const totals=[
+      ['الدين الكلي',sum(p.movements.filter(m=>m.kind==='add'))],
+      ['مجموع التسديد',sum(p.movements.filter(m=>m.kind==='pay'))],
+      ['المتبقي',balance(p)]
+    ];
     const files=[];
-    for(let start=0;start<wrapped.length;start+=48){
-      const page=wrapped.slice(start,start+48);
-      canvas.height=160+page.length*42;
-      ctx.fillStyle='#ffffff';
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle='#102a2b';
-      ctx.fillRect(0,0,canvas.width,85);
-      ctx.direction='rtl';
-      ctx.textAlign='right';
-      ctx.font='bold 33px system-ui, sans-serif';
-      ctx.fillStyle='#ffffff';
-      ctx.fillText('مطعم وكافيه أوتار — كشف الديون',850,55);
-      ctx.font=font;
-      ctx.fillStyle='#203134';
-      page.forEach((line,i)=>ctx.fillText(line,850,130+i*42));
+    const pageSize=29;
+    const pages=Math.max(1,Math.ceil(rows.length/pageSize));
+    const canvas=document.createElement('canvas');
+    canvas.width=1080;
+    const ctx=canvas.getContext('2d');
+    for(let page=0;page<pages;page++){
+      const pageRows=rows.slice(page*pageSize,(page+1)*pageSize);
+      canvas.height=470+Math.max(1,pageRows.length)*58;
+      const box=(x,y,w,h,color)=>{
+        ctx.fillStyle=color;
+        ctx.fillRect(x,y,w,h);
+      };
+      const text=(value,x,y,width,font,color='#203134')=>{
+        ctx.direction='rtl';
+        ctx.textAlign='right';
+        ctx.textBaseline='middle';
+        ctx.font=font+' system-ui, sans-serif';
+        ctx.fillStyle=color;
+        ctx.fillText(value,x,y,width);
+      };
+      box(0,0,1080,canvas.height,'#eef3f2');
+      box(0,0,1080,92,'#102a2b');
+      text('مطعم وكافيه أوتار',1028,46,976,'bold 40px','#ffffff');
+      box(30,110,1020,canvas.height-130,'#ffffff');
+      text('كشف حساب '+p.name,1016,150,952,'bold 38px');
+      if(p.phone)text(p.phone,1016,192,952,'26px');
+      totals.forEach(([caption,amount],index)=>{
+        const right=1016-index*324;
+        box(right-308,222,308,122,'#f3f8f7');
+        box(right-7,222,7,122,'#15655b');
+        text(caption,right-24,254,260,'26px','#526c68');
+        text(fmt(amount),right-24,307,260,'bold 33px');
+      });
+      const columns=[[1000,175],[820,140],[666,208],[445,220],[211,146]];
+      const headers=['التاريخ','الحركة','المبلغ','الرصيد','ملاحظات'];
+      box(64,364,952,58,'#eaf2f0');
+      headers.forEach((caption,index)=>{
+        const [right,width]=columns[index];
+        text(caption,right,393,width,'bold 25px');
+      });
+      pageRows.forEach((row,index)=>{
+        const top=422+index*58;
+        box(64,top,952,56,index%2?'#f7faf9':'#ffffff');
+        box(64,top+56,952,2,'#e3edeb');
+        row.forEach((value,col)=>{
+          const [right,width]=columns[col];
+          text(value,right,top+28,width,'24px');
+        });
+      });
+      if(!rows.length)text('لا توجد حركات',1000,451,920,'24px');
+      if(pages>1)text(String(page+1)+' / '+pages,1016,canvas.height-32,952,'20px','#526c68');
       const png=canvas.toDataURL('image/png').split(',')[1];
       const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0));
-      files.push(new File([bytes],'كشف-ديون-أوتار-'+(files.length+1)+'.png',{type:'image/png'}));
+      files.push(new File([bytes],'كشف-حساب-أوتار-'+(page+1)+'.png',{type:'image/png'}));
     }
     if(navigator.canShare?.({files})){
       await navigator.share({files});
