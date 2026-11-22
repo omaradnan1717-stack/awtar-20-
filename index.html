@@ -771,6 +771,11 @@ document.addEventListener('change',async event=>{
   flex-shrink:0;
 }
 .debt-account > details[open] > summary::after { transform:rotate(225deg); }
+.debt-account > details > summary .debt-account-balance {
+  margin-inline-start:auto;
+  text-align:end;
+}
+.debt-account > details[open] > summary .debt-account-balance { display:none; }
 </style>
 <script>
 (() => {
@@ -792,6 +797,12 @@ document.addEventListener('change',async event=>{
       details.open = openAccounts.has(details.dataset.debtAccount);
       const summary = document.createElement('summary');
       summary.append(title);
+      const remaining = card.querySelector('.topline strong');
+      if (remaining) {
+        const balance = remaining.cloneNode(true);
+        balance.classList.add('debt-account-balance');
+        summary.append(balance);
+      }
       details.append(summary, ...card.childNodes);
       card.classList.add('debt-account');
       card.append(details);
