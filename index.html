@@ -749,4 +749,63 @@ document.addEventListener('change',async event=>{
 },true);
 
 })();
-</script></body></html>
+</script><style>
+.debt-account > details > summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  min-height:44px;
+  cursor:pointer;
+  list-style:none;
+}
+.debt-account > details > summary::-webkit-details-marker { display:none; }
+.debt-account > details > summary::after {
+  content:"";
+  width:.5em;
+  height:.5em;
+  margin-inline-end:4px;
+  border:solid currentColor;
+  border-width:0 2px 2px 0;
+  transform:rotate(45deg);
+  flex-shrink:0;
+}
+.debt-account > details[open] > summary::after { transform:rotate(225deg); }
+</style>
+<script>
+(() => {
+  const renderParties = parties;
+  const openAccounts = new Set();
+  parties = function(type) {
+    const markup = renderParties.apply(this, arguments);
+    if (type !== 'debt') return markup;
+
+    const root = document.createElement('div');
+    root.innerHTML = markup;
+    for (const imageButton of root.querySelectorAll('[data-debt-image]')) {
+      const card = imageButton.closest('.panel');
+      const title = card?.querySelector('.topline h3');
+      if (!title) continue;
+
+      const details = document.createElement('details');
+      details.dataset.debtAccount = imageButton.dataset.debtImage;
+      details.open = openAccounts.has(details.dataset.debtAccount);
+      const summary = document.createElement('summary');
+      summary.append(title);
+      details.append(summary, ...card.childNodes);
+      card.classList.add('debt-account');
+      card.append(details);
+    }
+    return root.innerHTML;
+  };
+
+  document.getElementById('app').addEventListener('toggle', event => {
+    const details = event.target;
+    const accountId = details.dataset.debtAccount;
+    if (accountId === undefined || !details.isConnected) return;
+    if (details.open) openAccounts.add(accountId);
+    else openAccounts.delete(accountId);
+  }, true);
+})();
+</script>
+</body></html>
