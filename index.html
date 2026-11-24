@@ -51,19 +51,28 @@ function sharePartyWhatsApp(pid){
  if(p.type==='debt')return window.shareDebtImage(pid,false,phone);
  window.location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(partyWhatsAppText(p));
 }
+function addPartyStatementWhatsApp(pid){
+ const p=db.parties.find(account=>account.id===pid);
+ const actions=document.querySelector('#statementView .actions');
+ if(!p||!actions)return;
+ const button=document.createElement('button');
+ button.type='button';
+ button.textContent=p.type==='debt'?'نسخ صورة الكشف وفتح واتساب الشركة':'إرسال عبر واتساب';
+ button.onclick=()=>sharePartyWhatsApp(pid);
+ actions.prepend(button);
+ if(p.type==='debt'){
+   const download=document.createElement('button');
+   download.type='button';
+   download.className='light';
+   download.textContent='تنزيل صورة الكشف';
+   download.onclick=()=>window.shareDebtImage(pid,true);
+   actions.append(download);
+ }
+}
 const printPartyWithWhatsApp=printParty;
 printParty=function(pid){
  printPartyWithWhatsApp(pid);
- const actions=document.querySelector('#statementView .actions');
- if(actions){const button=document.createElement('button');button.textContent=db.parties.some(p=>p.id===pid&&p.type==='debt')?'نسخ الصورة وفتح واتساب الشركة':'إرسال عبر واتساب';button.onclick=()=>sharePartyWhatsApp(pid);actions.prepend(button);
-   if(db.parties.some(p=>p.id===pid&&p.type==='debt')){
-     const imageButton=document.createElement('button');
-     imageButton.type='button';
-     imageButton.textContent='مشاركة الكشف كصورة';
-     imageButton.onclick=()=>window.shareDebtImage(pid);
-     actions.prepend(imageButton);
-   }
- }
+ addPartyStatementWhatsApp(pid);
 };
 
 </script><script src="config.js?v=project-link-20261116"></script><script src="secure.js?v=cancel-topup-20261119"></script><script>
@@ -508,13 +517,13 @@ function accountsPage(isPartner){const ps=db.parties.filter(isPartner?partner:cu
  const q=cleanName(accountQuery),shown=ps.filter(p=>cleanName(p.name+' '+(p.phone||'')).includes(q));
  return `<section class="panel"><h2>${isPartner?'حسابات الشركاء':'ديون الزبائن والحسابات الموجودة'}</h2><p class="muted">${isPartner?'سجل مستقل لسفري الشركاء وسحوباتهم وتسديداتهم. الرصيد الموجب عليه، والسالب إله بذمة المطعم.':'جميع حسابات الديون السابقة محفوظة هنا، بما فيها المكاتب. الحركات القديمة تبقى كما سُجّلت.'}</p><div class="cards">${stat('إجمالي المبالغ عليهم',ps.reduce((n,p)=>n+Math.max(0,balance(p)),0))}${stat('أرصدة لصالح أصحاب الحسابات',ps.reduce((n,p)=>n+Math.max(0,-balance(p)),0))}</div><label for="accountSearch">بحث بالاسم أو الرقم</label><input id="accountSearch" value="${esc(accountQuery)}" oninput="accountSearchChanged(this.value)" placeholder="اكتب الاسم أو رقم الهاتف"><div id="accountList">${accountList(shown)}</div></section><section class="panel"><h2>إضافة ${isPartner?'شريك':'زبون'}</h2><form onsubmit="createAccount(event,${isPartner})"><div><label>الاسم</label><input name="name" required maxlength="100"></div><div><label>رقم الهاتف</label><input name="phone" type="tel" maxlength="30"></div><button>إضافة الحساب</button></form></section>`;
 }
-function accountList(ps){return ps.map(p=>`<div class="panel" style="border:1px solid #dce9e6;margin-top:12px"><div class="topline"><div><h3>${esc(p.name)}</h3><span dir="ltr">${esc(p.phone||'')}</span></div><strong>${balance(p)>=0?'عليه: ':'إله: '}${fmt(Math.abs(balance(p)))}</strong></div><div class="actions"><button onclick="openAccount('${p.id}')">فتح الحساب</button>${phoneLink(p)}<button onclick="accountShare('${p.id}')">واتساب</button></div></div>`).join('')||'<p class="muted">لا توجد حسابات مطابقة.</p>';}
+function accountList(ps){return ps.map(p=>`<div class="panel" style="border:1px solid #dce9e6;margin-top:12px"><div class="topline"><div><h3>${esc(p.name)}</h3><span dir="ltr">${esc(p.phone||'')}</span></div><strong>${balance(p)>=0?'عليه: ':'إله: '}${fmt(Math.abs(balance(p)))}</strong></div><div class="actions"><button onclick="openAccount('${p.id}')">فتح الحساب</button>${phoneLink(p)}<button onclick="${customer(p)?'sharePartyWhatsApp':'accountShare'}('${p.id}')">واتساب</button></div></div>`).join('')||'<p class="muted">لا توجد حسابات مطابقة.</p>';}
 window.accountSearchChanged=value=>{accountQuery=value;const q=cleanName(value);document.getElementById('accountList').innerHTML=accountList(db.parties.filter(tab==='partners'?partner:customer).filter(p=>cleanName(p.name+' '+(p.phone||'')).includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ar')));};
 window.openAccount=pid=>{selectedAccount=pid;accountMonth='';render();};
 window.backAccounts=()=>{selectedAccount=null;accountMonth='';render();};
 window.accountMonthChanged=value=>{accountMonth=value;render();};
 function detail(p,isPartner){const rows=accountRows(p),adds=sum(p.movements.filter(m=>m.kind==='add')),pays=sum(p.movements.filter(m=>m.kind==='pay'));
-return `<section class="panel"><div class="topline"><h2>${esc(p.name)}</h2><button onclick="backAccounts()">رجوع للحسابات</button></div><p dir="ltr">${esc(p.phone||'')}</p><div class="actions">${phoneLink(p)}<button onclick="editAccount('${p.id}')">تعديل الاسم / الرقم</button><button onclick="accountShare('${p.id}')">إرسال الكشف واتساب</button>${isPartner?'':debtImageActions(p)}<button onclick="accountPrint('${p.id}')">طباعة الكشف</button><button data-invoice-party="${esc(p.id)}" type="button">📎 فواتير الحساب</button></div><div class="cards">${stat('إجمالي المبالغ المسجلة عليه',adds)}${stat('التسديد والمبالغ لصالحه',pays)}${stat(balance(p)>=0?'المتبقي عليه — كل الفترات':'المتبقي إله — كل الفترات',Math.abs(balance(p)))}${isPartner?stat('إجمالي السفري',sum(p.movements.filter(m=>m.category==='safri')))+stat('السحب النقدي',sum(p.movements.filter(m=>m.category==='cash')))+stat('المبالغ الأخرى عليه',sum(p.movements.filter(m=>m.category==='other')))+stat('مبالغ دفعها للمطعم',sum(p.movements.filter(m=>m.category==='funding'))):''}</div></section>
+return `<section class="panel"><div class="topline"><h2>${esc(p.name)}</h2><button onclick="backAccounts()">رجوع للحسابات</button></div><p dir="ltr">${esc(p.phone||'')}</p><div class="actions">${phoneLink(p)}<button onclick="editAccount('${p.id}')">تعديل الاسم / الرقم</button>${isPartner?`<button onclick="accountShare('${p.id}')">إرسال الكشف واتساب</button>`:debtImageActions(p)}<button onclick="accountPrint('${p.id}')">طباعة الكشف</button><button data-invoice-party="${esc(p.id)}" type="button">📎 فواتير الحساب</button></div><div class="cards">${stat('إجمالي المبالغ المسجلة عليه',adds)}${stat('التسديد والمبالغ لصالحه',pays)}${stat(balance(p)>=0?'المتبقي عليه — كل الفترات':'المتبقي إله — كل الفترات',Math.abs(balance(p)))}${isPartner?stat('إجمالي السفري',sum(p.movements.filter(m=>m.category==='safri')))+stat('السحب النقدي',sum(p.movements.filter(m=>m.category==='cash')))+stat('المبالغ الأخرى عليه',sum(p.movements.filter(m=>m.category==='other')))+stat('مبالغ دفعها للمطعم',sum(p.movements.filter(m=>m.category==='funding'))):''}</div></section>
 <section class="panel"><h2>تسجيل حركة</h2><form onsubmit="recordAccountMovement(event,'${p.id}')"><div><label>التاريخ</label><input name="date" type="date" value="${today()}" max="${today()}" required></div><div><label>الحركة</label><select name="category" onchange="accountCategoryChanged(this.form)">${(isPartner?['safri','cash','other','pay','funding']:['sale','pay']).map(k=>`<option value="${k}">${label[k]}</option>`).join('')}</select></div>${moneyField}<div><label>التفاصيل / رقم الوصل</label><input name="note" maxlength="300"></div><div id="accountSaleBox" ${isPartner?'hidden':''}><label>احتساب المبيعات</label><select name="saleMode" required ${isPartner?'disabled':''}><option value="">اختر طريقة تسجيل البيع</option><option value="new">مبيعات جديدة لم تُسجّل — أضف بيعاً آجلاً</option><option value="recorded">مسجلة سابقاً كبيع آجل — لا تضفها مرة ثانية</option></select><p class="muted">إذا احتُسب الدين ضمن نقد مطابقة الكاشير، صحّح المطابقة أولاً؛ الدين ليس نقداً مستلماً.</p></div><div><label>صورة الوصل (اختياري)</label><input name="receipt" type="file" accept="image/*"><label>أو تصوير بالكاميرا</label><input name="camera" type="file" accept="image/*" capture="environment"></div><p class="muted" style="grid-column:1/-1">السفري يُسجّل بالمبلغ المتفق عليه (كلفة أو سعر بيع) ولا يُخصم نقداً. السحب النقدي ينقص الصندوق، والتسديد النقدي يزيده دون احتسابه مبيعات جديدة. المبلغ الذي يدفعه الشريك للمطعم هنا هو نقد يودعه بالصندوق؛ المصروف الذي يدفعه مباشرةً لمجهز يُسجّل «مبلغاً لصالحه بدون إيداع نقدي».</p>${isPartner?'<div><label>عند مبلغ دفعه للمطعم</label><select name="fundingMode"><option value="cash">إيداع نقدي بالصندوق</option><option value="noncash">مبلغ لصالحه بدون إيداع نقدي</option></select></div>':''}<button type="submit">حفظ الحركة</button><p id="accountSaveStatus" role="status"></p></form></section>
 <section class="panel"><h2>كشف الحركات</h2><label>تصفية الشهر — اتركه فارغاً لكل الفترات</label><input type="month" value="${esc(accountMonth)}" onchange="accountMonthChanged(this.value)"><p class="muted">المبالغ بالأعلى لكل الفترات. ${!isPartner?'الحركات القديمة لم تُربط تلقائياً بالصندوق؛ لا تُعد تسجيل تسديد قديم موجود بالإيرادات.':''}</p>${movementTable(p,rows,true)}</section>`;}
 window.accountCategoryChanged=f=>{const box=f.querySelector('#accountSaleBox');if(box){const sale=f.elements.category.value==='sale';box.hidden=!sale;f.elements.saleMode.disabled=!sale;}};
@@ -531,12 +540,11 @@ window.recordAccountMovement=async(e,pid)=>{e.preventDefault();const form=e.targ
 window.deleteAccountMovement=async(pid,mid)=>{try{const p=db.parties.find(p=>p.id===pid),m=p?.movements.find(m=>m.id===mid);if(!m?.accountVersion)throw Error('الحركة السابقة محفوظة');ensureDate(m.date);if(!confirm('حذف الحركة وتصحيح أثرها على الصندوق والمبيعات المرتبطة بها؟'))return;const next=structuredClone(db);next.parties.find(p=>p.id===pid).movements=p.movements.filter(m=>m.id!==mid);next.entries=next.entries.filter(e=>!(e.accountMovementId===mid&&e.accountPartyId===pid));await commitAccounts(next);}catch(x){alert(x.message);}};
 const oldRemoveMovement=removeMovement;removeMovement=function(pid,mid){const m=db.parties.find(p=>p.id===pid)?.movements.find(m=>m.id===mid);return m?.accountVersion?window.deleteAccountMovement(pid,mid):oldRemoveMovement(pid,mid);};
 window.accountReceipt=(pid,mid)=>{const p=db.parties.find(p=>p.id===pid),m=p?.movements.find(m=>m.id===mid);if(!m?.receipt?.startsWith('data:image/jpeg;base64,'))return;openStatement('وصل '+p.name,`<p>${datefmt(m.date)} — ${fmt(m.amount)} — ${esc(m.note)}</p><img alt="صورة الوصل" src="${esc(m.receipt)}" style="max-width:100%;height:auto">`);};
-window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;openStatement('كشف '+p.name,`<p>${esc(p.phone||'')} — ${accountMonth?esc(accountMonth):'كل الفترات'}</p><h3>${balance(p)>=0?'المتبقي عليه':'المتبقي إله'}: ${fmt(Math.abs(balance(p)))}</h3>${movementTable(p,accountRows(p),false)}`);};
+window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;openStatement('كشف '+p.name,`<p>${esc(p.phone||'')} — ${accountMonth?esc(accountMonth):'كل الفترات'}</p><h3>${balance(p)>=0?'المتبقي عليه':'المتبقي إله'}: ${fmt(Math.abs(balance(p)))}</h3>${movementTable(p,accountRows(p),false)}`);addPartyStatementWhatsApp(pid);};
 
 function debtImageActions(p){
-  const phone=whatsappPhone(p.phone);
-  const chat=phone?`<a class="btn" href="https://wa.me/${esc(phone.replace(/^\+/,''))}" target="_blank" rel="noopener noreferrer">فتح واتساب صاحب الحساب</a>`:'';
-  return '<button type="button" onclick="shareDebtImage()">مشاركة الكشف كصورة</button><button type="button" class="light" onclick="shareDebtImage(undefined,true)">تنزيل صورة الكشف</button>'+chat;
+  return `<button type="button" onclick="sharePartyWhatsApp('${p.id}')">نسخ صورة الكشف وفتح واتساب الشركة</button>
+    <button type="button" class="light" onclick="shareDebtImage('${p.id}',true)">تنزيل صورة الكشف</button>`;
 }
 
 window.shareDebtImage=async function(pid,download=false,phone=''){
