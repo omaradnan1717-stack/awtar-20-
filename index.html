@@ -46,16 +46,16 @@ function partyWhatsAppText(p){
 }
 function sharePartyWhatsApp(pid){
  const p=db.parties.find(x=>x.id===pid);if(!p)return alert('الحساب غير موجود');
- if(p.type==='debt')return window.shareDebtImage(pid);
  let phone=whatsappPhone(p.phone);
  if(!phone){const entered=prompt('أدخل رقم واتساب صاحب الحساب مع رمز الدولة، مثال: 9647701234567',p.phone||'');if(entered===null)return;phone=whatsappPhone(entered);if(!phone)return alert('رقم الهاتف غير صحيح. أدخل رقم الموبايل مع رمز الدولة.');}
+ if(p.type==='debt')return window.shareDebtImage(pid,false,phone);
  window.location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(partyWhatsAppText(p));
 }
 const printPartyWithWhatsApp=printParty;
 printParty=function(pid){
  printPartyWithWhatsApp(pid);
  const actions=document.querySelector('#statementView .actions');
- if(actions){const button=document.createElement('button');button.textContent='إرسال عبر واتساب';button.onclick=()=>sharePartyWhatsApp(pid);actions.prepend(button);
+ if(actions){const button=document.createElement('button');button.textContent=db.parties.some(p=>p.id===pid&&p.type==='debt')?'نسخ الصورة وفتح واتساب الشركة':'إرسال عبر واتساب';button.onclick=()=>sharePartyWhatsApp(pid);actions.prepend(button);
    if(db.parties.some(p=>p.id===pid&&p.type==='debt')){
      const imageButton=document.createElement('button');
      imageButton.type='button';
@@ -539,7 +539,7 @@ function debtImageActions(p){
   return '<button type="button" onclick="shareDebtImage()">مشاركة الكشف كصورة</button><button type="button" class="light" onclick="shareDebtImage(undefined,true)">تنزيل صورة الكشف</button>'+chat;
 }
 
-window.shareDebtImage=async function(pid,download=false){
+window.shareDebtImage=async function(pid,download=false,phone=''){
   const p=pid===undefined?currentAccount():db.parties.find(account=>account.id===pid);
   if(!p||!customer(p))return;
   try{
@@ -609,7 +609,18 @@ window.shareDebtImage=async function(pid,download=false){
       const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0));
       files.push(new File([bytes],'كشف-حساب-أوتار-'+(page+1)+'.png',{type:'image/png'}));
     }
-    if(!download&&navigator.canShare?.({files})){
+    if(phone&&files.length===1&&navigator.clipboard?.write&&typeof ClipboardItem==='function'){
+      try{
+        await navigator.clipboard.write([new ClipboardItem({'image/png':files[0]})]);
+      }catch{
+        download=true;
+      }
+      if(!download){
+        window.location.href='https://wa.me/'+phone;
+        return;
+      }
+    }
+    if(!phone&&!download&&navigator.canShare?.({files})){
       await navigator.share({files});
     }else{
       for(const file of files){
@@ -619,6 +630,10 @@ window.shareDebtImage=async function(pid,download=false){
         link.download=file.name;
         link.click();
         setTimeout(()=>URL.revokeObjectURL(url),60000);
+      }
+      if(phone){
+        alert('نزّلنا صورة الكشف. أرفقها من الملفات داخل محادثة الشركة.');
+        window.location.href='https://wa.me/'+phone;
       }
     }
   }catch(error){
