@@ -511,27 +511,7 @@ render=function(){if(['partners','customers'].includes(tab)&&profile?.role==='ad
 const oldGo=go;go=function(t){if(t!==tab){selectedAccount=null;accountQuery='';accountMonth='';}return oldGo(t);};
 const oldRevenueRows=revenueRows;revenueRows=function(rows){return oldRevenueRows(rows.filter(e=>!e.accountTransfer));};
 const oldSummary=revenueSummary;revenueSummary=function(rows){return oldSummary(rows.filter(e=>!e.accountTransfer));};
-const customerExpensesButton='<button type="button" data-customer-expenses onclick="go(\'customers\')">صرفيات الزبائن</button>';
-const oldLedger=ledger;
-ledger=function(type){
- const all=db.entries;
- db.entries=all.filter(e=>!e.accountTransfer);
- try{
-  const content=oldLedger(type);
-  return type==='expense'&&profile?.role==='admin'
-   ? '<section class="panel no-print">'+customerExpensesButton+'</section>'+content
-   : content;
- }finally{db.entries=all;}
-};
-const dailyBeforeCustomerExpenses=sharedDaily;
-sharedDaily=async function(){
- const result=await dailyBeforeCustomerExpenses.apply(this,arguments);
- const heading=document.getElementById('fundTotals')?.closest('.panel');
- if(profile?.role==='admin'&&heading&&!heading.querySelector('[data-customer-expenses]')){
-  heading.querySelector('h2')?.insertAdjacentHTML('afterend','<div class="actions no-print">'+customerExpensesButton+'</div>');
- }
- return result;
-};
+const oldLedger=ledger;ledger=function(type){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldLedger(type);}finally{db.entries=all;}};
 const oldExport=exportCSV;exportCSV=function(){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldExport.apply(this,arguments);}finally{db.entries=all;}};
 const oldReport=showReport;showReport=function(){const all=db.entries;db.entries=all.filter(e=>!e.accountTransfer);try{return oldReport();}finally{db.entries=all;}};
 const oldTable=entryTable;entryTable=function(rows,canDelete){const html=oldTable(rows,canDelete);if(!rows.some(e=>e.accountTransfer))return html;const root=document.createElement('div');root.innerHTML=html;const trs=root.querySelectorAll('tbody tr');rows.forEach((e,i)=>{if(e.accountTransfer&&trs[i]?.cells[1])trs[i].cells[1].textContent=e.type==='income'?'قبض حساب':'سحب شريك';});return root.innerHTML;};
