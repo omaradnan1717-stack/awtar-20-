@@ -44,11 +44,17 @@ function partyWhatsAppText(p){
  if(!p.movements.length)lines.push('لا توجد حركات');
  return lines.join('\n');
 }
-function sharePartyWhatsApp(pid){
+function sharePartyWhatsApp(pid,asImage=false){
  const p=db.parties.find(x=>x.id===pid);if(!p)return alert('الحساب غير موجود');
  let phone=whatsappPhone(p.phone);
  if(!phone){const entered=prompt('أدخل رقم واتساب صاحب الحساب مع رمز الدولة، مثال: 9647701234567',p.phone||'');if(entered===null)return;phone=whatsappPhone(entered);if(!phone)return alert('رقم الهاتف غير صحيح. أدخل رقم الموبايل مع رمز الدولة.');}
- if(p.type==='debt')return window.shareDebtImage(pid,false,phone);
+ if(asImage&&p.type==='debt')return window.shareDebtImage(pid,false,phone);
+ if(p.type==='debt'){
+   const current=balance(p);
+   const summary=['مطعم وكافيه أوتار','كشف حساب: '+p.name,'تاريخ الكشف: '+datefmt(today()),(current>=0?'المتبقي عليه: ':'الرصيد لصالحه: ')+fmt(Math.abs(current))].join('\n');
+   window.location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(summary);
+   return;
+ }
  window.location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(partyWhatsAppText(p));
 }
 function addPartyStatementWhatsApp(pid){
@@ -58,7 +64,7 @@ function addPartyStatementWhatsApp(pid){
  const button=document.createElement('button');
  button.type='button';
  button.textContent=p.type==='debt'?'نسخ صورة الكشف وفتح واتساب الشركة':'إرسال عبر واتساب';
- button.onclick=()=>sharePartyWhatsApp(pid);
+ button.onclick=()=>sharePartyWhatsApp(pid,p.type==='debt');
  actions.prepend(button);
  if(p.type==='debt'){
    const download=document.createElement('button');
@@ -543,7 +549,7 @@ window.accountReceipt=(pid,mid)=>{const p=db.parties.find(p=>p.id===pid),m=p?.mo
 window.accountPrint=pid=>{const p=db.parties.find(p=>p.id===pid);if(!p)return;openStatement('كشف '+p.name,`<p>${esc(p.phone||'')} — ${accountMonth?esc(accountMonth):'كل الفترات'}</p><h3>${balance(p)>=0?'المتبقي عليه':'المتبقي إله'}: ${fmt(Math.abs(balance(p)))}</h3>${movementTable(p,accountRows(p),false)}`);addPartyStatementWhatsApp(pid);};
 
 function debtImageActions(p){
-  return `<button type="button" onclick="sharePartyWhatsApp('${p.id}')">نسخ صورة الكشف وفتح واتساب الشركة</button>
+  return `<button type="button" onclick="sharePartyWhatsApp('${p.id}',true)">نسخ صورة الكشف وفتح واتساب الشركة</button>
     <button type="button" class="light" onclick="shareDebtImage('${p.id}',true)">تنزيل صورة الكشف</button>`;
 }
 
