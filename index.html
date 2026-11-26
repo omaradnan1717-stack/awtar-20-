@@ -570,32 +570,84 @@ window.shareDebtImage=async function(pid,download=false,phone=''){
   const p=pid===undefined?currentAccount():db.parties.find(account=>account.id===pid);
   if(!p||!customer(p))return;
   try{
+    const movements=p.movements.slice().sort((a,b)=>a.date.localeCompare(b.date)||Number(a.created||0)-Number(b.created||0));
+    const total=sum(movements.filter(m=>m.kind==='add'));
+    const paid=sum(movements.filter(m=>m.kind==='pay'));
     const remaining=balance(p);
     const canvas=document.createElement('canvas');
-    canvas.width=1080;
-    canvas.height=480;
     const ctx=canvas.getContext('2d');
+    const font='system-ui, sans-serif';
 
-    ctx.fillStyle='#eef3f2';
-    ctx.fillRect(0,0,1080,480);
-    ctx.fillStyle='#102a2b';
-    ctx.fillRect(0,0,1080,96);
-    ctx.fillStyle='#ffffff';
-    ctx.fillRect(32,120,1016,328);
-
+    ctx.font='20px '+font;
+    const rows=movements.map(m=>{
+      const lines=[];
+      let line='';
+      for(const word of String(m.note||'').trim().split(/\s+/)){
+        const next=line?line+' '+word:word;
+        if(line&&ctx.measureText(next).width>167){
+          lines.push(line);
+          line=word;
+        }else line=next;
+      }
+      if(line)lines.push(line);
+      return {movement:m,lines,height:Math.max(58,lines.length*25+18)};
+    });
+    const height=452+(rows.length?rows.reduce((n,r)=>n+r.height,0):58);
+    canvas.width=1080;
+    canvas.height=height;
     ctx.direction='rtl';
     ctx.textAlign='right';
     ctx.textBaseline='middle';
-    ctx.fillStyle='#ffffff';
-    ctx.font='bold 40px system-ui, sans-serif';
-    ctx.fillText('مطعم وكافيه أوتار',1008,48,936);
-    ctx.fillStyle='#203134';
-    ctx.fillText('كشف حساب '+p.name,1008,169,936);
-    ctx.font='28px system-ui, sans-serif';
-    ctx.fillText('تاريخ الكشف '+datefmt(today()),1008,225,936);
-    ctx.fillText(remaining>=0?'المتبقي عليه':'الرصيد لصالحه',1008,312,936);
-    ctx.font='bold 54px system-ui, sans-serif';
-    ctx.fillText(fmt(Math.abs(remaining)),1008,383,936);
+
+    function fill(color,x,y,w,h){
+      ctx.fillStyle=color;
+      ctx.fillRect(x,y,w,h);
+    }
+    function text(value,x,y,width,size,bold=false,color='#203134'){
+      ctx.fillStyle=color;
+      ctx.font=(bold?'bold ':'')+size+'px '+font;
+      ctx.fillText(value,x,y,width);
+    }
+    fill('#eef3f2',0,0,1080,height);
+    fill('#102a2b',0,0,1080,92);
+    text('مطعم وكافيه أوتار',1028,46,950,40,true,'#fff');
+    fill('#fff',30,110,1020,height-130);
+    text('كشف حساب '+p.name,1016,152,952,36,true);
+    if(p.phone)text(String(p.phone),1016,192,952,25);
+
+    const totals=[
+      ['الدين الكلي',total],
+      ['مجموع التسديد',paid],
+      [remaining>=0?'المتبقي':'الرصيد لصالحه',Math.abs(remaining)]
+    ];
+    totals.forEach(([label,amount],i)=>{
+      const x=708-i*324;
+      fill('#f2f6f5',x,222,308,122);
+      fill('#17685c',x+301,222,7,122);
+      text(label,x+284,256,265,24,false,'#526763');
+      text(fmt(amount),x+284,310,265,33,true);
+    });
+
+    const columns=[
+      ['التاريخ',1000,158],
+      ['الحركة',820,135],
+      ['المبلغ',666,204],
+      ['الرصيد',445,210],
+      ['ملاحظات',228,167]
+    ];
+    fill('#e8f1ef',60,364,956,58);
+    columns.forEach(([label,x,width])=>text(label,x,393,width,25,true));
+    let y=422,running=0;
+    if(!rows.length)text('لا توجد حركات',1000,y+29,925,24);
+    rows.forEach(({movement:m,lines,height:rowHeight},i)=>{
+      running+=(m.kind==='add'?1:-1)*m.amount;
+      fill(i%2?'#f6f9f8':'#fff',60,y,956,rowHeight);
+      fill('#e4ecea',60,y+rowHeight-2,956,2);
+      const values=[datefmt(m.date),m.kind==='add'?'إضافة':'تسديد',fmt(m.amount),fmt(running)];
+      values.forEach((value,i)=>text(value,columns[i][1],y+rowHeight/2,columns[i][2],24));
+      lines.forEach((line,i)=>text(line,228,y+(rowHeight-(lines.length-1)*25)/2+i*25,167,20));
+      y+=rowHeight;
+    });
 
     const png=canvas.toDataURL('image/png').split(',')[1];
     const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0));
