@@ -23,7 +23,7 @@ function entryTable(a,canDelete){return `<div class="scroll"><table><thead><tr><
 const ps=db.parties.filter(p=>p.type===type&&(type!=='debt'||p.accountClass!=='customer'));
 return `<section class="panel"><h2>إضافة ${singular[type]}</h2><form onsubmit="addParty(event,'${type}')"><div><label>الاسم</label><input name="name" required maxlength="100"></div><div><label>رقم الهاتف (اختياري)</label><input name="phone" maxlength="30"></div><button>إضافة</button></form></section><section class="panel"><h2>حسابات ${titles[type]}</h2><div class="cards">${stat('مجموع الدين',ps.reduce((s,p)=>s+sum(p.movements.filter(x=>x.kind==='add')),0))}${stat('مجموع التسديد',ps.reduce((s,p)=>s+sum(p.movements.filter(x=>x.kind==='pay')),0))}${stat('المتبقي',ps.reduce((s,p)=>s+balance(p),0))}${stat('عدد الحسابات',ps.length).replace(' د.ع',' حساب')}</div>${ps.map(p=>`<div class="panel" style="border:1px solid #e1e9e7;margin-top:14px"><div class="topline"><div><h3>${esc(p.name)}</h3><span class="muted">${esc(p.phone)}</span></div><div>الدين الكلي: ${fmt(sum(p.movements.filter(x=>x.kind==='add')))}<br>التسديد: ${fmt(sum(p.movements.filter(x=>x.kind==='pay')))}<br><strong>المتبقي: ${fmt(balance(p))}</strong></div></div><form onsubmit="addMovement(event,'${p.id}')">${dateField.replace(/value="[^"]*"/,`value="${today()}"`)}${moneyField}<div><label>نوع الحركة</label><select name="kind"><option value="add">${type==='supplier'?'مشتريات على الحساب':'إضافة مبلغ مستحق'}</option><option value="pay">${type==='supplier'?'تسديد للمجهز':'تسديد / استرجاع'}</option></select></div>${noteField}<button>تسجيل الحركة</button></form><div class="scroll"><table><thead><tr><th>التاريخ</th><th>الحركة</th><th>المبلغ</th><th>ملاحظات</th><th class="no-print">إجراء</th></tr></thead><tbody>${p.movements.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(x=>`<tr><td>${datefmt(x.date)}</td><td>${x.kind==='add'?'إضافة':'تسديد'}</td><td>${fmt(x.amount)}</td><td>${esc(x.note)}</td><td class="no-print"><button class="danger" onclick="removeMovement('${p.id}','${x.id}')">حذف</button></td></tr>`).join('')||'<tr><td colspan="5">لا توجد حركات</td></tr>'}</tbody></table></div><div class="actions no-print" style="margin-top:12px"><button class="light" onclick="printParty('${p.id}')">طباعة كشف الحساب</button>${p.type==='debt'?debtImageActions(p):`<button onclick="sharePartyWhatsApp('${p.id}')">إرسال عبر واتساب</button>`}<button class="danger" onclick="removeParty('${p.id}')">حذف الحساب</button></div></div>`).join('')||'<p class="muted">لا توجد حسابات مسجلة</p>'}</section><div class="notice">حسابات الديون مستقلة عن الإيرادات والمصروفات النقدية؛ سجل المدفوعات النقدية أيضاً بقسم المصروفات أو الإيرادات عند الحاجة، لتنعكس في رصيد الصندوق. تجنب تسجيل نفس العملية مرتين في القسم نفسه.</div>`}function addParty(e,type){e.preventDefault();const f=new FormData(e.target);if(!f.get('name').trim())return alert('أدخل الاسم');db.parties.push({id:id(),type,name:f.get('name').trim(),phone:f.get('phone').trim(),movements:[]});save();render()}function addMovement(e,pid){e.preventDefault();const p=db.parties.find(x=>x.id===pid),f=new FormData(e.target),amount=Number(f.get('amount'));if(!Number.isSafeInteger(amount)||amount<=0)return alert('المبلغ غير صحيح');if(f.get('kind')==='pay'&&amount>balance(p)&&!confirm('التسديد أكبر من الرصيد المستحق. متابعة؟'))return;p.movements.push({id:id(),date:f.get('date'),amount,kind:f.get('kind'),note:f.get('note')});save();render()}function removeMovement(pid,mid){if(confirm('حذف الحركة؟')){db.parties.find(x=>x.id===pid).movements=db.parties.find(x=>x.id===pid).movements.filter(x=>x.id!==mid);save();render()}}function removeParty(pid){const p=db.parties.find(x=>x.id===pid);if(p.movements.length)return alert('احذف حركات الحساب أولاً للحفاظ على السجل');if(confirm('حذف الحساب؟')){db.parties=db.parties.filter(x=>x.id!==pid);save();render()}}function printParty(pid){const p=db.parties.find(x=>x.id===pid),w=window.open('','_blank');if(!w)return alert('اسمح بالنوافذ المنبثقة للطباعة');w.document.write(`<html dir="rtl"><meta charset="utf-8"><title>كشف حساب</title><style>body{font-family:Arial;padding:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #aaa;padding:9px;text-align:right}</style><h2>مطعم وكافيه أوتار - كشف حساب ${esc(p.name)}</h2><h3>الرصيد: ${fmt(balance(p))}</h3><table><tr><th>التاريخ</th><th>الحركة</th><th>المبلغ</th><th>ملاحظات</th></tr>${p.movements.map(x=>`<tr><td>${datefmt(x.date)}</td><td>${x.kind==='add'?'إضافة':'تسديد'}</td><td>${fmt(x.amount)}</td><td>${esc(x.note)}</td></tr>`).join('')}</table></html>`);w.document.close();w.focus();setTimeout(()=>w.print(),300)}function report(){return `<section class="panel"><h2>تقرير العمليات المالية</h2><form onsubmit="event.preventDefault();showReport()"><div><label>من تاريخ</label><input id="from" type="date" value="${today().slice(0,7)}-01" required></div><div><label>إلى تاريخ</label><input id="to" type="date" value="${today()}" required></div><button>عرض التقرير</button></form></section><section id="reportResult" class="panel"></section>`}function showReport(){const from=document.getElementById('from').value,to=document.getElementById('to').value;if(from>to)return alert('تاريخ البداية بعد النهاية');const a=db.entries.filter(x=>x.date>=from&&x.date<=to).sort((x,y)=>x.date.localeCompare(y.date)),ins=sum(a.filter(x=>x.type==='income')),outs=sum(a.filter(x=>x.type==='expense'));document.getElementById('reportResult').innerHTML=`<div class="topline"><h2>من ${datefmt(from)} إلى ${datefmt(to)}</h2><div class="actions no-print"><button onclick="window.print()">طباعة</button><button onclick="exportCSV('${from}','${to}')">تصدير CSV / Excel</button></div></div><div class="cards">${stat('الإيرادات',ins)}${stat('المصروفات',outs)}${stat('الفرق',ins-outs)}</div><h3>تفاصيل العمليات</h3>${entryTable(a,false)}`}function exportCSV(from,to){const a=db.entries.filter(x=>x.date>=from&&x.date<=to),rows=[['التاريخ','النوع','التصنيف','المبلغ','طريقة الدفع','ملاحظات'],...a.map(x=>[datefmt(x.date),x.type==='income'?'إيراد':'مصروف',x.category,x.amount,x.method,x.note])];download('\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n'),'awtar-report.csv','text/csv;charset=utf-8')}function backup(){return `<section class="panel"><h2>النسخ الاحتياطي</h2><p>صدّر جميع البيانات إلى ملف JSON، واحفظه في تطبيق الملفات أو iCloud Drive. يمكنك استرجاعه لاحقاً.</p><div class="actions"><button onclick="download(JSON.stringify(db,null,2),'awtar-backup-${today()}.json','application/json')">تنزيل نسخة احتياطية</button></div><h3>استرجاع نسخة</h3><p class="notice">الاسترجاع يستبدل جميع البيانات الحالية. نزّل نسخة احتياطية أولاً.</p><input type="file" id="restore" accept=".json,application/json"><button style="margin-top:12px" onclick="restore()">استرجاع البيانات</button></section><section class="panel"><h2>معلومات الحفظ</h2><p>البيانات محفوظة داخل متصفح هذا الجهاز فقط، وقد تُفقد عند مسح بيانات Safari أو استخدام التصفح الخاص. النسخة لا تحتوي على تسجيل دخول أو مزامنة بين الأجهزة.</p></section>`}function download(content,name,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}async function restore(){const file=document.getElementById('restore').files[0];if(!file)return alert('اختر ملف النسخة الاحتياطية');try{const x=JSON.parse(await file.text());if(!x||!Array.isArray(x.entries)||!Array.isArray(x.parties)||!x.entries.every(e=>['income','expense'].includes(e.type)&&Number.isSafeInteger(e.amount)&&e.amount>0&&typeof e.date==='string')||!x.parties.every(p=>['supplier','debt','advance'].includes(p.type)&&Array.isArray(p.movements)&&p.movements.every(m=>['add','pay'].includes(m.kind)&&Number.isSafeInteger(m.amount)&&m.amount>0)))throw Error('invalid');if(!confirm('استبدال كل البيانات الحالية ببيانات الملف؟'))return;db=x;save();render();alert('تم الاسترجاع')}catch(e){alert('الملف غير صالح أو غير متوافق')}}
 function debtImageActions(p){
-  return `<button type="button" data-debt-image="${esc(p.id)}" onclick="sharePartyWhatsApp(this.dataset.debtImage)">نسخ صورة الكشف وفتح واتساب الشركة</button>
+  return `<button type="button" data-debt-image="${esc(p.id)}" onclick="sharePartyWhatsApp(this.dataset.debtImage)">إرسال صورة الكشف عبر واتساب</button>
     <button type="button" class="light" onclick="shareDebtImage('${p.id}',true)">تنزيل صورة الكشف</button>`;
 }
 function closeStatement(){document.getElementById('statementView')?.remove();document.querySelector('main').classList.remove('hidden')}
@@ -63,7 +63,7 @@ function addPartyStatementWhatsApp(pid){
  if(!p||!actions)return;
  const button=document.createElement('button');
  button.type='button';
- button.textContent=p.type==='debt'?'نسخ صورة الكشف وفتح واتساب الشركة':'إرسال عبر واتساب';
+ button.textContent=p.type==='debt'?'إرسال صورة الكشف عبر واتساب':'إرسال عبر واتساب';
  button.onclick=()=>sharePartyWhatsApp(pid);
  actions.prepend(button);
  if(p.type==='debt'){
@@ -600,28 +600,60 @@ window.shareDebtImage=async function(pid,download=false,phone=''){
     const png=canvas.toDataURL('image/png').split(',')[1];
     const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0));
     const file=new File([bytes],'كشف-حساب-أوتار.png',{type:'image/png'});
-    if(phone&&!download&&navigator.clipboard?.write&&typeof ClipboardItem==='function'){
-      try{
-        await navigator.clipboard.write([new ClipboardItem({'image/png':file})]);
-        window.location.href='https://wa.me/'+phone;
-        return;
-      }catch{
-        // Offer the image as a download when clipboard access is unavailable.
-      }
-    }
-
     const url=URL.createObjectURL(file);
     const link=document.createElement('a');
     link.href=url;
     link.download=file.name;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
-    if(phone){
-      alert('تم تنزيل صورة الكشف. أرفقها من الملفات داخل محادثة الشركة.');
-      window.location.href='https://wa.me/'+phone;
+    if(download||!phone){
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+      return;
     }
+
+    let copied=false;
+    if(navigator.clipboard?.write&&typeof ClipboardItem==='function'){
+      try{
+        await navigator.clipboard.write([new ClipboardItem({'image/png':file})]);
+        copied=true;
+      }catch{}
+    }
+
+    const dialog=document.createElement('dialog');
+    dialog.className='panel';
+    dialog.style.maxWidth='min(420px, 92vw)';
+    const title=document.createElement('h2');
+    title.textContent='إرسال كشف '+p.name;
+    const instructions=document.createElement('p');
+    instructions.textContent=copied
+      ? 'تم نسخ الصورة. افتح واتساب، اضغط مطوّلاً بحقل الرسالة واختر لصق، ثم اضغط إرسال.'
+      : 'نزّل الصورة، ثم افتح واتساب وأرفقها من الملفات وأرسلها.';
+    const preview=document.createElement('img');
+    preview.src=url;
+    preview.alt='معاينة صورة كشف الحساب';
+    preview.style.width='100%';
+    const actions=document.createElement('div');
+    actions.className='actions';
+    const whatsapp=document.createElement('a');
+    whatsapp.className='btn';
+    whatsapp.href='https://wa.me/'+phone;
+    whatsapp.textContent='فتح واتساب الزبون';
+    link.className='btn light';
+    link.textContent='تنزيل الصورة';
+    const close=document.createElement('button');
+    close.type='button';
+    close.className='light';
+    close.textContent='إغلاق';
+    close.onclick=()=>dialog.close();
+    dialog.addEventListener('close',()=>{
+      dialog.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+    },{once:true});
+    actions.append(...(copied?[whatsapp,link]:[link,whatsapp]),close);
+    dialog.append(title,instructions,preview,actions);
+    document.body.append(dialog);
+    dialog.showModal();
   }catch(error){
     if(error.name!=='AbortError')alert('تعذّرت مشاركة صورة الكشف. حاول مرة ثانية.');
   }
