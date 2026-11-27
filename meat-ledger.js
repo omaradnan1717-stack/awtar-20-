@@ -14,20 +14,22 @@
   const purchaseSum = rows => rows.reduce((total,row) => total + Number(row.total),0);
   const paymentSum = rows => rows.reduce((total,row) => total + Number(row.amount),0);
   const matchSupplier = (name, choice) => !choice || supplierKey(name) === choice;
+  const debtMonthOf = row => row.meatDebtMonth || row.date.slice(0,7);
+  const monthLabel = month => month.split('-').reverse().join(' / ');
 
   function meatTotals(purchases, payments, selected, choice) {
     const buys = purchases.filter(row => matchSupplier(row.supplier, choice));
     const paid = payments.filter(row => matchSupplier(row.meatPaymentSupplier, choice));
     const purchaseRows = buys.filter(row => row.purchase_date.slice(0,7) === selected);
-    const paymentRows = paid.filter(row => row.date.slice(0,7) === selected);
-    const opening = purchaseSum(buys.filter(row => row.purchase_date.slice(0,7) < selected)) -
-      paymentSum(paid.filter(row => row.date.slice(0,7) < selected));
-    return {purchaseRows, paymentRows, opening, remaining: opening + purchaseSum(purchaseRows) - paymentSum(paymentRows)};
+    const paymentRows = paid.filter(row => debtMonthOf(row) === selected);
+    const prior = purchaseSum(buys.filter(row => row.purchase_date.slice(0,7) < selected)) -
+      paymentSum(paid.filter(row => debtMonthOf(row) < selected));
+    return {purchaseRows, paymentRows, prior, remaining: purchaseSum(purchaseRows) - paymentSum(paymentRows)};
   }
 
-  function paymentLimit(purchases, payments, choice, date) {
-    const buys = purchases.filter(row => matchSupplier(row.supplier, choice));
-    const paid = payments.filter(row => matchSupplier(row.meatPaymentSupplier, choice));
+  function paymentLimit(purchases, payments, choice, date, debtMonth) {
+    const buys = purchases.filter(row => matchSupplier(row.supplier, choice) && row.purchase_date.slice(0,7) === debtMonth);
+    const paid = payments.filter(row => matchSupplier(row.meatPaymentSupplier, choice) && debtMonthOf(row) === debtMonth);
     const balanceAt = day => purchaseSum(buys.filter(row => row.purchase_date <= day)) -
       paymentSum(paid.filter(row => row.date <= day));
     // A backdated payment must also leave enough to cover already posted later payments.
@@ -232,19 +234,20 @@
     }
     function paint() {
       observer?.disconnect();
-      const {purchaseRows: rows, paymentRows, opening, remaining} = meatTotals(records, payments, loadedMonth, supplier.value);
+      const {purchaseRows: rows, paymentRows, prior, remaining} = meatTotals(records, payments, loadedMonth, supplier.value);
       const options = Array.from(supplier.options).filter(option => option.value).map(option =>
         '<option value="' + esc(option.value) + '"' + (option.value === supplier.value ? ' selected' : '') + '>' + esc(option.textContent) + '</option>').join('');
       list.innerHTML = `<div class="cards" style="margin:14px 0">
       <div class="stat">إجمالي الوزن<b>${number.format(totalKg(rows))} كغم</b></div>
-      ${stat('رصيد من الأشهر السابقة', opening)}
       ${stat('مشتريات الشهر بالآجل', totalAmount(rows))}
-      ${stat('تسديدات الشهر', paymentSum(paymentRows))}
-      ${stat('المتبقي بذمتك', remaining)}</div>
+      ${stat('تسديدات على مشتريات هذا الشهر', paymentSum(paymentRows))}
+      ${stat('المتبقي من هذا الشهر فقط', remaining)}
+      ${stat('مدوّر الأشهر السابقة (منفصل)', prior)}</div>
       <h3>تسديد اللحوم</h3>
       <p class="muted">سجّل دفعة اللحوم هنا فقط. ما تحتاج تضيفها مرة ثانية بالمصروفات أو بحساب المجهّز العام.</p>
       ${options ? `<form id="meatPaymentForm">
         <label>المجهّز<select name="paySupplier" required><option value="">اختَر المجهّز</option>${options}</select></label>
+        <label>شهر الدين<select name="payDebtMonth" required></select></label>
         <label>تاريخ التسديد<input name="payDate" type="date" value="${today()}" max="${today()}" required></label>
         <label>مبلغ التسديد (دينار)<input name="payAmount" type="number" min="1" step="1" inputmode="numeric" required></label>
         <label>طريقة الدفع<select name="payMethod">${paymentMethods.map(method => '<option>' + method + '</option>').join('')}</select></label>
@@ -252,8 +255,8 @@
         <p id="meatPayBalance" class="muted"></p>
         <button type="submit">حفظ التسديد وترحيله للمصروفات</button>
         <p id="meatPayStatus" role="status">${esc(filters.message || '')}</p></form>` : '<p>يظهر التسديد بعد تسجيل مشتريات أول مجهّز.</p>'}
-      <h3>سجل تسديدات الشهر</h3>
-      ${paymentRows.length ? '<div class="scroll"><table><thead><tr><th>التاريخ</th><th>المجهّز</th><th>المبلغ</th><th>الطريقة</th></tr></thead><tbody>' +
+      <h3>التسديدات على مشتريات هذا الشهر</h3>
+      ${paymentRows.length ? '<div class="scroll"><table><thead><tr><th>تاريخ الدفع</th><th>المجهّز</th><th>المبلغ</th><th>الطريقة</th></tr></thead><tbody>' +
         paymentRows.slice().sort((a,b) => b.date.localeCompare(a.date) || b.created - a.created).map(row =>
           '<tr><td>' + esc(datefmt(row.date)) + '</td><td>' + esc(row.meatPaymentSupplier) + '</td><td>' + fmt(row.amount) + '</td><td>' + esc(row.method) + '</td></tr>').join('') +
         '</tbody></table></div>' : '<p>ماكو تسديدات لهذا الشهر.</p>'}
@@ -307,34 +310,46 @@
     function bindPaymentForm() {
       const form = list.querySelector('#meatPaymentForm');
       if (!form) return;
-      const {paySupplier, payDate, payAmount, payMethod, payNote} = form.elements;
+      const {paySupplier, payDebtMonth, payDate, payAmount, payMethod, payNote} = form.elements;
       const status = form.querySelector('#meatPayStatus');
       const maxDisplay = form.querySelector('#meatPayBalance');
       const submit = form.querySelector('[type=submit]');
       const showLimit = () => {
-        maxDisplay.textContent = paySupplier.value && payDate.value ?
-          'المتاح للتسديد بهذا التاريخ: ' + fmt(paymentLimit(records, payments, paySupplier.value, payDate.value)) : '';
+        maxDisplay.textContent = paySupplier.value && payDate.value && payDebtMonth.value ?
+          'المتاح للتسديد عن ' + monthLabel(payDebtMonth.value) + ': ' +
+          fmt(paymentLimit(records, payments, paySupplier.value, payDate.value, payDebtMonth.value)) : '';
       };
-      paySupplier.onchange = payDate.onchange = showLimit;
-      showLimit();
+      const setDebtMonths = () => {
+        const prior = payDebtMonth.value;
+        const months = paySupplier.value ? [...new Set(records.filter(row => supplierKey(row.supplier) === paySupplier.value && row.purchase_date <= today())
+          .map(row => row.purchase_date.slice(0,7)))].sort().reverse() : [];
+        payDebtMonth.replaceChildren(new Option('اختَر شهر الدين', ''), ...months.map(value => new Option(monthLabel(value),value)));
+        if (months.includes(prior)) payDebtMonth.value = prior;
+        else if (months.includes(loadedMonth)) payDebtMonth.value = loadedMonth;
+        showLimit();
+      };
+      paySupplier.onchange = setDebtMonths;
+      payDate.onchange = payDebtMonth.onchange = showLimit;
+      setDebtMonths();
       form.onsubmit = async event => {
         event.preventDefault();
         if (!isAdmin() || sending) return;
         const ownerId = session?.user?.id;
         if (!ownerId) return;
         if (pendingPayment?.ownerId !== ownerId) pendingPayment = null;
-        const choice = paySupplier.value, date = payDate.value, amount = payAmount.valueAsNumber;
+        const choice = paySupplier.value, date = payDate.value, amount = payAmount.valueAsNumber, debtMonth = payDebtMonth.value;
         const name = paySupplier.selectedOptions[0]?.textContent, method = payMethod.value, note = payNote.value.trim();
-        if (!choice || !name || !Number.isSafeInteger(amount) || amount < 1 || !paymentMethods.includes(method)) {
-          status.textContent = 'أدخل المجهّز وطريقة الدفع ومبلغاً صحيحاً.';
+        if (!choice || !name || !/^\d{4}-\d{2}$/.test(debtMonth) || debtMonth > date.slice(0,7) || !Number.isSafeInteger(amount) || amount < 1 || !paymentMethods.includes(method)) {
+          status.textContent = 'أدخل المجهّز وشهر دين ما يكون بعد تاريخ الدفع، وطريقة دفع ومبلغ صحيح.';
           return;
         }
-        const fingerprint = JSON.stringify([choice,date,amount,method,note]);
+        const fingerprint = JSON.stringify([choice,date,debtMonth,amount,method,note]);
         const attempt = pendingPayment && pendingPayment.fingerprint === fingerprint ? pendingPayment : {fingerprint, key: id(), ownerId};
         sending = submit.disabled = true;
         busy(true);
         let attempted = false;
-        const finished = () => openLedger({selected: loadedMonth, supplier: choice, message: 'تم تسجيل ' + fmt(amount) + ' وترحيله للمصروفات بتاريخ ' + datefmt(date) + '.'});
+        const finished = () => openLedger({selected: loadedMonth, supplier: choice, message: 'تم تسديد ' + fmt(amount) + ' عن ' + monthLabel(debtMonth) +
+          ' وترحيله للمصروفات بتاريخ ' + datefmt(date) + '.'});
         try {
           await refreshAdmin();
           if (pendingPayment && db.entries.some(row => row.id === pendingPayment.key)) {
@@ -353,14 +368,15 @@
           // compare-and-swap revision guard, so a concurrent payment cannot be overwritten.
           await refreshAdmin();
           if (!isAdmin() || !form.isConnected) return;
-          const limit = paymentLimit(freshPurchases, paymentsIn(db), choice, date);
-          maxDisplay.textContent = 'المتاح للتسديد بهذا التاريخ: ' + fmt(limit);
-          if (amount > limit) throw Error('مبلغ التسديد أعلى من المتبقي لهذا المجهّز بهذا التاريخ.');
-          if (!confirm('ترحيل ' + fmt(amount) + ' إلى المصروفات وتسديده من حساب ' + name + '؟')) return;
+          const limit = paymentLimit(freshPurchases, paymentsIn(db), choice, date, debtMonth);
+          maxDisplay.textContent = 'المتاح للتسديد عن ' + monthLabel(debtMonth) + ': ' + fmt(limit);
+          if (amount > limit) throw Error('مبلغ التسديد أعلى من المتبقي لهذا المجهّز عن شهر الدين المختار.');
+          if (!confirm('ترحيل ' + fmt(amount) + ' إلى المصروفات وتسديده من حساب ' + name + ' عن ' + monthLabel(debtMonth) + '؟')) return;
           const next = structuredClone(db);
           // The expense is the payment record; there is no second write or duplicate cash entry.
           next.entries.push({id: attempt.key, type: 'expense', created: Date.now(), date, amount, method,
-            category: paymentKind, note: 'تسديد لحوم: ' + name + (note ? ' · ' + note : ''), meatPaymentSupplier: name});
+            category: paymentKind, note: 'تسديد لحوم: ' + name + ' · عن ' + monthLabel(debtMonth) + (note ? ' · ' + note : ''),
+            meatPaymentSupplier: name, meatDebtMonth: debtMonth});
           pendingPayment = attempt;
           attempted = true;
           await finance.commitAccounts(next);
@@ -427,7 +443,7 @@
       await refreshAdmin();
       const current = db.entries.find(entry => entry.id === key);
       if (!current) return render();
-      if (current.meatPaymentSupplier !== row.meatPaymentSupplier || current.amount !== row.amount || current.date !== row.date) throw Error('تغيّر التسديد، راجعه قبل الإلغاء.');
+      if (current.meatPaymentSupplier !== row.meatPaymentSupplier || debtMonthOf(current) !== debtMonthOf(row) || current.amount !== row.amount || current.date !== row.date) throw Error('تغيّر التسديد، راجعه قبل الإلغاء.');
       finance.ensureDate(current.date);
       const next = structuredClone(db);
       next.entries = next.entries.filter(entry => entry.id !== key);
