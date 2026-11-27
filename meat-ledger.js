@@ -33,9 +33,17 @@
     const owner = isAdmin();
     app.innerHTML = owner ? `
       <section class="panel"><h2>سجل اللحوم بالآجل</h2>
-      <div class="actions"><label>الشهر<input id="meatMonth" type="month" value="${today().slice(0,7)}"></label>
-      <label>المجهّز<select id="meatSupplier"><option value="">كل المجهّزين</option></select></label>
-      <button type="button" id="meatRefresh">تحديث الكشف</button></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px 18px">
+        <div role="group" aria-label="الشهر والسنة" style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;min-width:0">
+          <label style="min-width:0">الشهر<select id="meatMonth" dir="ltr" style="min-width:0">${Array.from({length:12}, (_, i) => {
+            const value = String(i + 1).padStart(2,'0');
+            return `<option value="${value}"${today().slice(5,7) === value ? ' selected' : ''}>${value}</option>`;
+          }).join('')}</select></label>
+          <label style="min-width:0">السنة<input id="meatYear" type="number" dir="ltr" inputmode="numeric" min="1900" max="9998" step="1" value="${today().slice(0,4)}" required style="min-width:0"></label>
+        </div>
+        <label style="min-width:0">المجهّز<select id="meatSupplier" style="min-width:0"><option value="">كل المجهّزين</option></select></label>
+      </div>
+      <button type="button" id="meatRefresh" style="margin-top:10px">تحديث الكشف</button>
       <div id="meatRows" aria-live="polite"></div></section>` : `
       <section class="panel"><h2>تسجيل شراء لحوم بالآجل</h2>
       <form id="meatForm">
@@ -149,22 +157,46 @@
 
   function bindReport() {
     const month = document.getElementById('meatMonth');
+    const year = document.getElementById('meatYear');
     const supplier = document.getElementById('meatSupplier');
     const list = document.getElementById('meatRows');
-    let records = [], generation = 0, observer;
+    let records = [], generation = 0, observer, loadedMonth = '';
+    const openDays = new Map();
+    const totalKg = rows => rows.reduce((total, row) => total + Math.round(Number(row.kg) * 1000), 0) / 1000;
+    const totalAmount = rows => rows.reduce((total, row) => total + Number(row.total), 0);
+    function dailyLedger(rows) {
+      const currentDay = today();
+      const days = new Map();
+      if (loadedMonth === currentDay.slice(0,7)) days.set(currentDay, []);
+      for (const row of rows) {
+        if (!days.has(row.purchase_date)) days.set(row.purchase_date, []);
+        days.get(row.purchase_date).push(row);
+      }
+      return [...days.keys()].sort().reverse().map(day => {
+        const purchases = days.get(day);
+        return `<details class="daily-ledger-day" data-meat-day="${esc(day)}"${(openDays.get(day) ?? day === currentDay) ? ' open' : ''}>
+          <summary><strong>${day === currentDay ? 'اليوم · ' : ''}${esc(datefmt(day))}</strong>
+          <span style="display:inline-flex;flex-wrap:wrap;gap:4px 10px"><span>${number.format(totalKg(purchases))} كغم</span><span>${fmt(totalAmount(purchases))}</span></span></summary>
+          <div style="padding:0 10px">${purchases.map(row => `<article style="padding:12px 0;border-top:1px solid #e4ecea">
+            <h3>${esc(row.supplier || 'بدون اسم مجهّز')}</h3>
+            <p>${number.format(row.kg)} كغم × ${fmt(row.price_per_kg)} · <strong>${fmt(row.total)}</strong></p>
+            ${row.note ? '<p>' + esc(row.note) + '</p>' : ''}
+            <div data-meat-receipt="${esc(row.id)}">جارٍ تحميل صورة الوصل…</div></article>`).join('') || '<p>ماكو قيود لهذا اليوم.</p>'}</div>
+          </details>`;
+      }).join('') || '<p>ماكو قيود لهالشهر.</p>';
+    }
     function paint() {
       observer?.disconnect();
       const rows = records.filter(row => !supplier.value || row.supplier === supplier.value);
-      const kg = rows.reduce((total, row) => total + Math.round(Number(row.kg) * 1000), 0) / 1000;
-      const amount = rows.reduce((total, row) => total + Number(row.total), 0);
       list.innerHTML = `<div class="cards" style="margin:14px 0">
-      <div class="stat">إجمالي الوزن<b>${number.format(kg)} كغم</b></div>
-      ${stat('مستحق مشتريات الشهر بالآجل', amount)}</div>` +
-        (rows.map(row => `<article class="panel" style="border:1px solid #dce9e6">
-        <h3>${esc(row.supplier || 'بدون اسم مجهّز')}</h3><p>${esc(datefmt(row.purchase_date))} ·
-        ${number.format(row.kg)} كغم × ${fmt(row.price_per_kg)} · <strong>${fmt(row.total)}</strong></p>
-        ${row.note ? '<p>' + esc(row.note) + '</p>' : ''}
-        <div data-meat-receipt="${esc(row.id)}">جارٍ تحميل صورة الوصل…</div></article>`).join('') || '<p>ماكو قيود لهالشهر.</p>');
+      <div class="stat">إجمالي الوزن<b>${number.format(totalKg(rows))} كغم</b></div>
+      ${stat('مستحق مشتريات الشهر بالآجل', totalAmount(rows))}</div>
+      <h3>السجل اليومي</h3>` + dailyLedger(rows);
+      for (const day of list.querySelectorAll('[data-meat-day]')) {
+        day.addEventListener('toggle', () => {
+          if (day.isConnected) openDays.set(day.dataset.meatDay, day.open);
+        });
+      }
       async function showPhoto(target) {
         try {
           const [row] = await api(endpoint + '?select=receipt&id=eq.' + encodeURIComponent(target.dataset.meatReceipt));
@@ -193,13 +225,22 @@
       }, {rootMargin:'240px'});
       for (const target of list.querySelectorAll('[data-meat-receipt]')) {
         if (observer) observer.observe(target);
-        else showPhoto(target);
+        else {
+          const day = target.closest('details');
+          const load = () => {
+            if (!day.open) return;
+            day.removeEventListener('toggle', load);
+            showPhoto(target);
+          };
+          day.addEventListener('toggle', load);
+          load();
+        }
       }
     }
     async function refresh() {
       if (!isAdmin()) return;
-      const selected = month.value;
-      if (!/^\d{4}-\d{2}$/.test(selected)) return;
+      if (!year.reportValidity()) return;
+      const selected = year.valueAsNumber + '-' + month.value;
       const ticket = ++generation;
       observer?.disconnect();
       list.textContent = 'جارٍ تحديث السجل…';
@@ -214,6 +255,7 @@
           if (ticket !== generation || !list.isConnected) return;
           result.push(...page);
         } while (page.length === 100);
+        loadedMonth = selected;
         records = result;
         const previous = supplier.value;
         const names = [...new Set(result.map(row => row.supplier).filter(Boolean))].sort((a,b) => a.localeCompare(b,'ar'));
@@ -224,8 +266,8 @@
         if (ticket === generation) list.textContent = 'تعذّر تحميل السجل: ' + error.message;
       }
     }
-    month.onchange = document.getElementById('meatRefresh').onclick = refresh;
-    supplier.onchange = paint;
+    month.onchange = year.onchange = document.getElementById('meatRefresh').onclick = refresh;
+    supplier.onchange = () => { if (loadedMonth === year.valueAsNumber + '-' + month.value) paint(); };
     refresh();
   }
 
