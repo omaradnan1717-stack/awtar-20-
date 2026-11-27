@@ -5,6 +5,47 @@
   const canEnter = () => profile?.role === 'employee' && profile.username === employeeName;
   const isAdmin = () => profile?.role === 'admin';
   const number = new Intl.NumberFormat('en-US', {maximumFractionDigits: 3});
+  const supplierKey = value => String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+  const paymentKind = 'تسديد لحوم';
+  const paymentMethods = ['نقدي', 'ماستر كارد'];
+  const finance = window.awtarMeatFinance;
+  let pendingPayment = null;
+  const paymentsIn = state => state.entries.filter(row => row.type === 'expense' && typeof row.meatPaymentSupplier === 'string' && row.meatPaymentSupplier);
+  const purchaseSum = rows => rows.reduce((total,row) => total + Number(row.total),0);
+  const paymentSum = rows => rows.reduce((total,row) => total + Number(row.amount),0);
+  const matchSupplier = (name, choice) => !choice || supplierKey(name) === choice;
+
+  function meatTotals(purchases, payments, selected, choice) {
+    const buys = purchases.filter(row => matchSupplier(row.supplier, choice));
+    const paid = payments.filter(row => matchSupplier(row.meatPaymentSupplier, choice));
+    const purchaseRows = buys.filter(row => row.purchase_date.slice(0,7) === selected);
+    const paymentRows = paid.filter(row => row.date.slice(0,7) === selected);
+    const opening = purchaseSum(buys.filter(row => row.purchase_date.slice(0,7) < selected)) -
+      paymentSum(paid.filter(row => row.date.slice(0,7) < selected));
+    return {purchaseRows, paymentRows, opening, remaining: opening + purchaseSum(purchaseRows) - paymentSum(paymentRows)};
+  }
+
+  function paymentLimit(purchases, payments, choice, date) {
+    const buys = purchases.filter(row => matchSupplier(row.supplier, choice));
+    const paid = payments.filter(row => matchSupplier(row.meatPaymentSupplier, choice));
+    const balanceAt = day => purchaseSum(buys.filter(row => row.purchase_date <= day)) -
+      paymentSum(paid.filter(row => row.date <= day));
+    // A backdated payment must also leave enough to cover already posted later payments.
+    return Math.max(0, [...new Set(paid.filter(row => row.date > date).map(row => row.date))]
+      .reduce((min, day) => Math.min(min, balanceAt(day)), balanceAt(date)));
+  }
+
+  async function loadPurchases(end, alive = () => true) {
+    const query = '?select=id,purchase_date,supplier,kg,price_per_kg,total,note&order=purchase_date.desc,id.desc&purchase_date=lte.' + end + '&limit=500';
+    const rows = [];
+    let page;
+    do {
+      page = await api(endpoint + query + '&offset=' + rows.length);
+      if (!alive()) return null;
+      rows.push(...page);
+    } while (page.length === 500);
+    return [...new Map(rows.map(row => [row.id,row])).values()];
+  }
 
   function addButton() {
     if ((!canEnter() && !isAdmin()) || nav.querySelector('[data-meat-ledger]')) return;
@@ -12,7 +53,7 @@
     button.type = 'button';
     button.dataset.meatLedger = '';
     button.textContent = 'سجل اللحوم';
-    button.onclick = openLedger;
+    button.onclick = () => openLedger();
     const logoutButton = nav.querySelector('button[onclick="logout()"]');
     nav.insertBefore(button, logoutButton);
   }
@@ -28,7 +69,7 @@
     addButton();
   };
 
-  function openLedger() {
+  function openLedger(filters = {}) {
     if (!canEnter() && !isAdmin()) return;
     const owner = isAdmin();
     app.innerHTML = owner ? `
@@ -59,7 +100,7 @@
       <img id="meatPreview" alt="معاينة الوصل" style="max-width:100%;max-height:320px" hidden></div>
       <output id="meatTotal" class="notice">مبلغ الشراء ${fmt(0)}</output>
       <button type="submit">حفظ بالآجل</button><p id="meatStatus" role="status"></p></form></section>`;
-    if (owner) bindReport();
+    if (owner) bindReport(filters);
     else bindEntry();
   }
 
@@ -155,15 +196,19 @@
     };
   }
 
-  function bindReport() {
+  function bindReport(filters) {
     const month = document.getElementById('meatMonth');
     const year = document.getElementById('meatYear');
     const supplier = document.getElementById('meatSupplier');
     const list = document.getElementById('meatRows');
-    let records = [], generation = 0, observer, loadedMonth = '';
+    if (filters.selected) {
+      [year.value, month.value] = filters.selected.split('-');
+    }
+    let records = [], payments = [], generation = 0, observer, loadedMonth = '', sending = false;
+    let chosenSupplier = filters.supplier || '';
     const openDays = new Map();
     const totalKg = rows => rows.reduce((total, row) => total + Math.round(Number(row.kg) * 1000), 0) / 1000;
-    const totalAmount = rows => rows.reduce((total, row) => total + Number(row.total), 0);
+    const totalAmount = purchaseSum;
     function dailyLedger(rows) {
       const currentDay = today();
       const days = new Map();
@@ -187,11 +232,33 @@
     }
     function paint() {
       observer?.disconnect();
-      const rows = records.filter(row => !supplier.value || row.supplier === supplier.value);
+      const {purchaseRows: rows, paymentRows, opening, remaining} = meatTotals(records, payments, loadedMonth, supplier.value);
+      const options = Array.from(supplier.options).filter(option => option.value).map(option =>
+        '<option value="' + esc(option.value) + '"' + (option.value === supplier.value ? ' selected' : '') + '>' + esc(option.textContent) + '</option>').join('');
       list.innerHTML = `<div class="cards" style="margin:14px 0">
       <div class="stat">إجمالي الوزن<b>${number.format(totalKg(rows))} كغم</b></div>
-      ${stat('مستحق مشتريات الشهر بالآجل', totalAmount(rows))}</div>
-      <h3>السجل اليومي</h3>` + dailyLedger(rows);
+      ${stat('رصيد من الأشهر السابقة', opening)}
+      ${stat('مشتريات الشهر بالآجل', totalAmount(rows))}
+      ${stat('تسديدات الشهر', paymentSum(paymentRows))}
+      ${stat('المتبقي بذمتك', remaining)}</div>
+      <h3>تسديد اللحوم</h3>
+      <p class="muted">سجّل دفعة اللحوم هنا فقط. ما تحتاج تضيفها مرة ثانية بالمصروفات أو بحساب المجهّز العام.</p>
+      ${options ? `<form id="meatPaymentForm">
+        <label>المجهّز<select name="paySupplier" required><option value="">اختَر المجهّز</option>${options}</select></label>
+        <label>تاريخ التسديد<input name="payDate" type="date" value="${today()}" max="${today()}" required></label>
+        <label>مبلغ التسديد (دينار)<input name="payAmount" type="number" min="1" step="1" inputmode="numeric" required></label>
+        <label>طريقة الدفع<select name="payMethod">${paymentMethods.map(method => '<option>' + method + '</option>').join('')}</select></label>
+        <label>ملاحظة<input name="payNote" maxlength="200"></label>
+        <p id="meatPayBalance" class="muted"></p>
+        <button type="submit">حفظ التسديد وترحيله للمصروفات</button>
+        <p id="meatPayStatus" role="status">${esc(filters.message || '')}</p></form>` : '<p>يظهر التسديد بعد تسجيل مشتريات أول مجهّز.</p>'}
+      <h3>سجل تسديدات الشهر</h3>
+      ${paymentRows.length ? '<div class="scroll"><table><thead><tr><th>التاريخ</th><th>المجهّز</th><th>المبلغ</th><th>الطريقة</th></tr></thead><tbody>' +
+        paymentRows.slice().sort((a,b) => b.date.localeCompare(a.date) || b.created - a.created).map(row =>
+          '<tr><td>' + esc(datefmt(row.date)) + '</td><td>' + esc(row.meatPaymentSupplier) + '</td><td>' + fmt(row.amount) + '</td><td>' + esc(row.method) + '</td></tr>').join('') +
+        '</tbody></table></div>' : '<p>ماكو تسديدات لهذا الشهر.</p>'}
+      <h3>سجل المشتريات اليومي</h3>` + dailyLedger(rows);
+      bindPaymentForm();
       for (const day of list.querySelectorAll('[data-meat-day]')) {
         day.addEventListener('toggle', () => {
           if (day.isConnected) openDays.set(day.dataset.meatDay, day.open);
@@ -237,8 +304,85 @@
         }
       }
     }
+    function bindPaymentForm() {
+      const form = list.querySelector('#meatPaymentForm');
+      if (!form) return;
+      const {paySupplier, payDate, payAmount, payMethod, payNote} = form.elements;
+      const status = form.querySelector('#meatPayStatus');
+      const maxDisplay = form.querySelector('#meatPayBalance');
+      const submit = form.querySelector('[type=submit]');
+      const showLimit = () => {
+        maxDisplay.textContent = paySupplier.value && payDate.value ?
+          'المتاح للتسديد بهذا التاريخ: ' + fmt(paymentLimit(records, payments, paySupplier.value, payDate.value)) : '';
+      };
+      paySupplier.onchange = payDate.onchange = showLimit;
+      showLimit();
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (!isAdmin() || sending) return;
+        const ownerId = session?.user?.id;
+        if (!ownerId) return;
+        if (pendingPayment?.ownerId !== ownerId) pendingPayment = null;
+        const choice = paySupplier.value, date = payDate.value, amount = payAmount.valueAsNumber;
+        const name = paySupplier.selectedOptions[0]?.textContent, method = payMethod.value, note = payNote.value.trim();
+        if (!choice || !name || !Number.isSafeInteger(amount) || amount < 1 || !paymentMethods.includes(method)) {
+          status.textContent = 'أدخل المجهّز وطريقة الدفع ومبلغاً صحيحاً.';
+          return;
+        }
+        const fingerprint = JSON.stringify([choice,date,amount,method,note]);
+        const attempt = pendingPayment && pendingPayment.fingerprint === fingerprint ? pendingPayment : {fingerprint, key: id(), ownerId};
+        sending = submit.disabled = true;
+        busy(true);
+        let attempted = false;
+        const finished = () => openLedger({selected: loadedMonth, supplier: choice, message: 'تم تسجيل ' + fmt(amount) + ' وترحيله للمصروفات بتاريخ ' + datefmt(date) + '.'});
+        try {
+          await refreshAdmin();
+          if (pendingPayment && db.entries.some(row => row.id === pendingPayment.key)) {
+            if (pendingPayment.key === attempt.key) { finished(); return; }
+            pendingPayment = null;
+            payments = paymentsIn(db);
+            showLimit();
+            status.textContent = 'تم تأكيد التسديد السابق. راجع الرصيد المحدّث واضغط الحفظ مجدداً للتسديد الجديد.';
+            return;
+          }
+          pendingPayment = null;
+          finance.ensureDate(date);
+          const freshPurchases = await loadPurchases(today());
+          if (!isAdmin() || !form.isConnected) return;
+          // Read the revision again after the purchase history. The save uses the existing
+          // compare-and-swap revision guard, so a concurrent payment cannot be overwritten.
+          await refreshAdmin();
+          if (!isAdmin() || !form.isConnected) return;
+          const limit = paymentLimit(freshPurchases, paymentsIn(db), choice, date);
+          maxDisplay.textContent = 'المتاح للتسديد بهذا التاريخ: ' + fmt(limit);
+          if (amount > limit) throw Error('مبلغ التسديد أعلى من المتبقي لهذا المجهّز بهذا التاريخ.');
+          if (!confirm('ترحيل ' + fmt(amount) + ' إلى المصروفات وتسديده من حساب ' + name + '؟')) return;
+          const next = structuredClone(db);
+          // The expense is the payment record; there is no second write or duplicate cash entry.
+          next.entries.push({id: attempt.key, type: 'expense', created: Date.now(), date, amount, method,
+            category: paymentKind, note: 'تسديد لحوم: ' + name + (note ? ' · ' + note : ''), meatPaymentSupplier: name});
+          pendingPayment = attempt;
+          attempted = true;
+          await finance.commitAccounts(next);
+          pendingPayment = null;
+          finished();
+        } catch (error) {
+          if (attempted && isAdmin()) {
+            try {
+              await refreshAdmin();
+              if (db.entries.some(row => row.id === attempt.key)) { pendingPayment = null; finished(); return; }
+            } catch (_) {}
+          }
+          if (form.isConnected) status.textContent = error.message;
+          else alert(error.message);
+        } finally {
+          sending = submit.disabled = false;
+          busy(false);
+        }
+      };
+    }
     async function refresh() {
-      if (!isAdmin()) return;
+      if (!isAdmin() || sending) return;
       if (!year.reportValidity()) return;
       const selected = year.valueAsNumber + '-' + month.value;
       const ticket = ++generation;
@@ -246,30 +390,50 @@
       list.textContent = 'جارٍ تحديث السجل…';
       try {
         const [year, value] = selected.split('-').map(Number);
-        const next = value === 12 ? (year + 1) + '-01' : year + '-' + String(value + 1).padStart(2, '0');
-        const query = '?select=id,purchase_date,supplier,kg,price_per_kg,total,note&order=purchase_date.desc,id.desc&purchase_date=gte.' + selected + '-01&purchase_date=lt.' + next + '-01&limit=100';
-        const result = [];
-        let page;
-        do {
-          page = await api(endpoint + query + '&offset=' + result.length);
-          if (ticket !== generation || !list.isConnected) return;
-          result.push(...page);
-        } while (page.length === 100);
+        const end = selected + '-' + new Date(Date.UTC(year,value,0)).getUTCDate();
+        const active = () => ticket === generation && list.isConnected && isAdmin();
+        const result = await loadPurchases(end > today() ? end : today(), active);
+        if (!active()) return;
+        await refreshAdmin();
+        if (!active()) return;
         loadedMonth = selected;
         records = result;
-        const previous = supplier.value;
-        const names = [...new Set(result.map(row => row.supplier).filter(Boolean))].sort((a,b) => a.localeCompare(b,'ar'));
-        supplier.replaceChildren(new Option('كل المجهّزين', ''), ...names.map(name => new Option(name,name)));
-        if (names.includes(previous)) supplier.value = previous;
+        payments = paymentsIn(db);
+        const names = new Map();
+        for (const name of [...result.map(row => row.supplier), ...payments.map(row => row.meatPaymentSupplier)]) {
+          if (supplierKey(name) && !names.has(supplierKey(name))) names.set(supplierKey(name), name);
+        }
+        supplier.replaceChildren(new Option('كل المجهّزين', ''), ...[...names].sort((a,b) => a[1].localeCompare(b[1],'ar')).map(([key,name]) => new Option(name,key)));
+        if (names.has(chosenSupplier)) supplier.value = chosenSupplier;
         paint();
       } catch (error) {
         if (ticket === generation) list.textContent = 'تعذّر تحميل السجل: ' + error.message;
       }
     }
     month.onchange = year.onchange = document.getElementById('meatRefresh').onclick = refresh;
-    supplier.onchange = () => { if (loadedMonth === year.valueAsNumber + '-' + month.value) paint(); };
+    supplier.onchange = () => {
+      chosenSupplier = supplier.value;
+      if (loadedMonth === year.valueAsNumber + '-' + month.value) paint();
+    };
     refresh();
   }
+
+  const removeOtherExpense = removeEntry;
+  removeEntry = async function (key) {
+    const row = db.entries.find(entry => entry.id === key);
+    if (!row?.meatPaymentSupplier) return removeOtherExpense.apply(this, arguments);
+    if (!isAdmin() || !confirm('إلغاء تسديد اللحوم بقيمة ' + fmt(row.amount) + '؟ سيُحذف المصروف ويعود المبلغ إلى ذمة المجهّز.')) return;
+    try {
+      await refreshAdmin();
+      const current = db.entries.find(entry => entry.id === key);
+      if (!current) return render();
+      if (current.meatPaymentSupplier !== row.meatPaymentSupplier || current.amount !== row.amount || current.date !== row.date) throw Error('تغيّر التسديد، راجعه قبل الإلغاء.');
+      finance.ensureDate(current.date);
+      const next = structuredClone(db);
+      next.entries = next.entries.filter(entry => entry.id !== key);
+      await finance.commitAccounts(next);
+    } catch (error) { alert(error.message); }
+  };
 
   async function preparePhoto(file, scan) {
     if (file.size > 15000000) throw Error('اختَر صورة أقل من 15 ميغابايت.');
@@ -339,4 +503,5 @@
  const bottom=Math.min(canvas.height,Math.ceil((yMax+4)*canvas.height/height));
  return [left,top,right-left,bottom-top];
 }
+  if (profile) addButton();
 })();
